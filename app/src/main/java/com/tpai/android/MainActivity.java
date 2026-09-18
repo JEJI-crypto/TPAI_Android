@@ -11,6 +11,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -26,12 +27,15 @@ import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.HashMap;
 
 public class MainActivity extends Activity {
     private static final String SUPABASE_URL = "https://fdqvjaqclnjztiodfucg.supabase.co";
     private static final String SUPABASE_PUBLISHABLE_KEY = "sb_publishable_gEReYquGc4yUs1MSDeNztw_FQCpwVuw";
     private static final String SCHEMA = "timported";
     private static final int MAX_MATCHES = 10;
+    private static final int REPLAY_STEP_MS = 1800;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private LinearLayout list;
@@ -39,6 +43,7 @@ public class MainActivity extends Activity {
     private TextView status;
     private ProgressBar progress;
     private Button refresh;
+    private final List<ReplayController> replays = new ArrayList<ReplayController>();
 
     static class MatchItem {
         String code = "";
@@ -50,6 +55,7 @@ public class MainActivity extends Activity {
         String score = "";
         String competitionKey = "";
         String competitionHeader = "";
+        List<JSONObject> states = new ArrayList<JSONObject>();
     }
 
     @Override public void onCreate(Bundle state) {
@@ -77,7 +83,7 @@ public class MainActivity extends Activity {
         menu.setContentDescription("Menu");
         topBar.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
 
-        TextView app = text("TPAI_Android  •  V1.12", 13, Color.rgb(146,154,164), Typeface.BOLD);
+        TextView app = text("TPAI_Android  •  V1.13", 13, Color.rgb(146,154,164), Typeface.BOLD);
         topBar.addView(app, new LinearLayout.LayoutParams(0, dp(42), 1));
         root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(42)));
 
@@ -185,9 +191,17 @@ public class MainActivity extends Activity {
             String t = clean(row.optString("match_time", ""));
             m.stage = d + (t.isEmpty() ? "" : "  " + t);
             m.score = "LIVE réel • état " + live.optInt("state_number", 0);
+            m.states = matchStates(matchId);
             out.add(m);
             if (out.size() >= 30) break;
         }
+        return out;
+    }
+
+    private List<JSONObject> matchStates(long matchId) throws Exception {
+        List<JSONObject> out = new ArrayList<JSONObject>();
+        JSONArray rows = getJson("/rest/v1/match_states?select=*&match_id=eq." + matchId + "&order=state_number.asc");
+        for (int i = 0; i < rows.length(); i++) out.add(rows.getJSONObject(i));
         return out;
     }
 
@@ -308,6 +322,7 @@ public class MainActivity extends Activity {
     }
 
     private void render(List<MatchItem> items) {
+        stopAllReplays();
         list.removeAllViews();
         counter.setText(items.size() + (items.size() > 1 ? " matchs" : " match"));
         progress.setVisibility(View.GONE); refresh.setEnabled(true);
@@ -344,55 +359,148 @@ public class MainActivity extends Activity {
         return header;
     }
 
-    private View matchRow(MatchItem m) {
+    private View matchRow(final MatchItem m) {
         LinearLayout line = new LinearLayout(this);
-        line.setOrientation(LinearLayout.HORIZONTAL);
-        line.setGravity(Gravity.CENTER_VERTICAL);
-        line.setPadding(dp(4), dp(3), dp(7), dp(3));
+        line.setOrientation(LinearLayout.VERTICAL);
+        line.setPadding(dp(7), dp(4), dp(7), dp(4));
         line.setBackgroundColor(Color.rgb(27,31,35));
 
-        TextView star = text("☆", 19, Color.rgb(220,228,234), Typeface.NORMAL);
-        star.setGravity(Gravity.CENTER);
-        line.addView(star, new LinearLayout.LayoutParams(dp(36), dp(62)));
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
 
-        LinearLayout center = new LinearLayout(this);
-        center.setOrientation(LinearLayout.VERTICAL);
-        center.setGravity(Gravity.CENTER_VERTICAL);
-        TextView p1 = text(m.player1, 14, Color.WHITE, Typeface.BOLD);
-        TextView p2 = text(m.player2, 14, Color.WHITE, Typeface.BOLD);
-        center.addView(p1, new LinearLayout.LayoutParams(-1, dp(27)));
-        center.addView(p2, new LinearLayout.LayoutParams(-1, dp(27)));
-        line.addView(center, new LinearLayout.LayoutParams(0, dp(62), 1));
+        LinearLayout names = new LinearLayout(this);
+        names.setOrientation(LinearLayout.VERTICAL);
+        final TextView p1 = text(m.player1, 13, Color.WHITE, Typeface.BOLD);
+        final TextView p2 = text(m.player2, 13, Color.WHITE, Typeface.BOLD);
+        names.addView(p1, new LinearLayout.LayoutParams(-1, dp(26)));
+        names.addView(p2, new LinearLayout.LayoutParams(-1, dp(26)));
+        top.addView(names, new LinearLayout.LayoutParams(0, dp(52), 1));
 
-        LinearLayout odds = new LinearLayout(this);
-        odds.setOrientation(LinearLayout.VERTICAL);
-        odds.setGravity(Gravity.CENTER);
-        TextView o1 = text(formatOdd(m.live1), 14, Color.rgb(255,214,64), Typeface.BOLD);
-        TextView o2 = text(formatOdd(m.live2), 14, Color.rgb(255,214,64), Typeface.BOLD);
-        o1.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
-        o2.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
-        odds.addView(o1, new LinearLayout.LayoutParams(-1, dp(27)));
-        odds.addView(o2, new LinearLayout.LayoutParams(-1, dp(27)));
-        line.addView(odds, new LinearLayout.LayoutParams(dp(62), dp(62)));
+        LinearLayout server = new LinearLayout(this);
+        server.setOrientation(LinearLayout.VERTICAL);
+        final TextView ball1 = text("🎾", 15, Color.WHITE, Typeface.NORMAL);
+        final TextView ball2 = text("🎾", 15, Color.WHITE, Typeface.NORMAL);
+        ball1.setGravity(Gravity.CENTER); ball2.setGravity(Gravity.CENTER);
+        ball1.setVisibility(View.INVISIBLE); ball2.setVisibility(View.INVISIBLE);
+        server.addView(ball1, new LinearLayout.LayoutParams(dp(28), dp(26)));
+        server.addView(ball2, new LinearLayout.LayoutParams(dp(28), dp(26)));
+        top.addView(server, new LinearLayout.LayoutParams(dp(28), dp(52)));
 
-        LinearLayout meta = new LinearLayout(this);
-        meta.setOrientation(LinearLayout.VERTICAL);
-        meta.setGravity(Gravity.CENTER);
-        TextView st = text("ST", 10, Color.rgb(174,239,208), Typeface.BOLD);
-        st.setGravity(Gravity.CENTER);
-        TextView time = text(shortStage(m.stage), 9, Color.rgb(150,158,166), Typeface.NORMAL);
-        time.setGravity(Gravity.CENTER);
-        meta.addView(st, new LinearLayout.LayoutParams(-1, dp(27)));
-        meta.addView(time, new LinearLayout.LayoutParams(-1, dp(27)));
-        line.addView(meta, new LinearLayout.LayoutParams(dp(58), dp(62)));
+        LinearLayout setsWon = new LinearLayout(this);
+        setsWon.setOrientation(LinearLayout.VERTICAL);
+        final TextView sw1 = scoreText("0", 15, Color.rgb(255,214,64));
+        final TextView sw2 = scoreText("0", 15, Color.rgb(255,214,64));
+        setsWon.addView(sw1, new LinearLayout.LayoutParams(dp(25), dp(26)));
+        setsWon.addView(sw2, new LinearLayout.LayoutParams(dp(25), dp(26)));
+        top.addView(setsWon, new LinearLayout.LayoutParams(dp(25), dp(52)));
 
-        View separator = new View(this);
-        separator.setBackgroundColor(Color.rgb(48,54,60));
-        LinearLayout wrapper = new LinearLayout(this);
-        wrapper.setOrientation(LinearLayout.VERTICAL);
-        wrapper.addView(line, new LinearLayout.LayoutParams(-1, dp(62)));
+        LinearLayout games = new LinearLayout(this);
+        games.setOrientation(LinearLayout.VERTICAL);
+        final TextView gs1 = scoreText("0", 13, Color.WHITE);
+        final TextView gs2 = scoreText("0", 13, Color.WHITE);
+        games.addView(gs1, new LinearLayout.LayoutParams(dp(86), dp(26)));
+        games.addView(gs2, new LinearLayout.LayoutParams(dp(86), dp(26)));
+        top.addView(games, new LinearLayout.LayoutParams(dp(86), dp(52)));
+
+        LinearLayout points = new LinearLayout(this);
+        points.setOrientation(LinearLayout.VERTICAL);
+        final TextView pt1 = scoreText("0", 15, Color.rgb(174,239,208));
+        final TextView pt2 = scoreText("0", 15, Color.rgb(174,239,208));
+        points.addView(pt1, new LinearLayout.LayoutParams(dp(34), dp(26)));
+        points.addView(pt2, new LinearLayout.LayoutParams(dp(34), dp(26)));
+        top.addView(points, new LinearLayout.LayoutParams(dp(34), dp(52)));
+
+        final TextView breakView = text("BREAK", 10, Color.rgb(255,90,90), Typeface.BOLD);
+        breakView.setGravity(Gravity.CENTER);
+        breakView.setVisibility(View.INVISIBLE);
+        top.addView(breakView, new LinearLayout.LayoutParams(dp(48), dp(52)));
+        line.addView(top, new LinearLayout.LayoutParams(-1, dp(52)));
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setGravity(Gravity.CENTER_VERTICAL);
+        final TextView state = text(m.states.isEmpty() ? "Données de déroulement indisponibles" : "PRÊT • faux direct", 9, Color.rgb(150,158,166), Typeface.NORMAL);
+        footer.addView(state, new LinearLayout.LayoutParams(0, dp(20), 1));
+        final TextView odds = text(formatOdd(m.live1) + "  •  " + formatOdd(m.live2), 10, Color.rgb(255,214,64), Typeface.BOLD);
+        odds.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+        footer.addView(odds, new LinearLayout.LayoutParams(dp(105), dp(20)));
+        line.addView(footer, new LinearLayout.LayoutParams(-1, dp(20)));
+
+        View separator = new View(this); separator.setBackgroundColor(Color.rgb(48,54,60));
+        LinearLayout wrapper = new LinearLayout(this); wrapper.setOrientation(LinearLayout.VERTICAL);
+        wrapper.addView(line, new LinearLayout.LayoutParams(-1, dp(80)));
         wrapper.addView(separator, new LinearLayout.LayoutParams(-1, dp(1)));
+
+        ReplayController rc = new ReplayController(m, ball1, ball2, sw1, sw2, gs1, gs2, pt1, pt2, breakView, state);
+        replays.add(rc); rc.start();
         return wrapper;
+    }
+
+    private TextView scoreText(String value, int sp, int color) {
+        TextView v = text(value, sp, color, Typeface.BOLD); v.setGravity(Gravity.CENTER); return v;
+    }
+
+    private class ReplayController implements Runnable {
+        final MatchItem match; final TextView ball1, ball2, sw1, sw2, gs1, gs2, pt1, pt2, breakView, statusView;
+        int index = 0; boolean stopped = false; boolean blink = false;
+        ReplayController(MatchItem m, TextView b1, TextView b2, TextView s1, TextView s2, TextView g1, TextView g2, TextView p1, TextView p2, TextView br, TextView st) {
+            match=m; ball1=b1; ball2=b2; sw1=s1; sw2=s2; gs1=g1; gs2=g2; pt1=p1; pt2=p2; breakView=br; statusView=st;
+        }
+        void start() { if (!match.states.isEmpty()) main.postDelayed(this, 500); }
+        void stop() { stopped=true; main.removeCallbacks(this); }
+        @Override public void run() {
+            if (stopped || index >= match.states.size()) { if (!stopped) statusView.setText("TERMINÉ"); return; }
+            JSONObject s = match.states.get(index++); applyState(s);
+            if (!stopped) main.postDelayed(this, REPLAY_STEP_MS);
+        }
+        void applyState(JSONObject s) {
+            String server = first(s, "server", "service", "server_player", "serving_player", "serveur").toUpperCase(Locale.US);
+            int side = sideOf(server);
+            ball1.setVisibility(side==1 ? View.VISIBLE : View.INVISIBLE); ball2.setVisibility(side==2 ? View.VISIBLE : View.INVISIBLE);
+
+            String[] wins = pairFrom(s, new String[]{"sets_score","set_score","sets_won","score_sets"}, new String[]{"sets_player1","set_player1","sets1","player1_sets"}, new String[]{"sets_player2","set_player2","sets2","player2_sets"});
+            sw1.setText(wins[0]); sw2.setText(wins[1]);
+            String[] game = pairFrom(s, new String[]{"games_score","game_score","score_games","current_set_score"}, new String[]{"games_player1","game_player1","games1","player1_games"}, new String[]{"games_player2","game_player2","games2","player2_games"});
+            String[] setLine = setScores(s, game);
+            gs1.setText(setLine[0]); gs2.setText(setLine[1]);
+            String[] pts = pairFrom(s, new String[]{"points","points_score","point_score","score_points"}, new String[]{"points_player1","point_player1","points1","player1_points"}, new String[]{"points_player2","point_player2","points2","player2_points"});
+            pt1.setText(pts[0]); pt2.setText(pts[1]);
+
+            boolean br = isBreakPoint(pts[0], pts[1], side);
+            if (br) { blink=!blink; breakView.setVisibility(blink ? View.VISIBLE : View.INVISIBLE); }
+            else breakView.setVisibility(View.INVISIBLE);
+            statusView.setText("EN DIRECT • état " + s.optInt("state_number", index));
+        }
+    }
+
+    private void stopAllReplays() { for (int i=0;i<replays.size();i++) replays.get(i).stop(); replays.clear(); }
+
+    private static int sideOf(String v) {
+        String s=clean(v).toLowerCase(Locale.US);
+        if (s.equals("1")||s.equals("j1")||s.equals("p1")||s.contains("player1")||s.contains("joueur 1")) return 1;
+        if (s.equals("2")||s.equals("j2")||s.equals("p2")||s.contains("player2")||s.contains("joueur 2")) return 2;
+        return 0;
+    }
+    private static String first(JSONObject o, String... keys) { for(String k:keys){ String v=clean(o.optString(k,"")); if(!v.isEmpty()) return v; } return ""; }
+    private static String[] splitPair(String raw) { String s=clean(raw).replace(':','-'); String[] a=s.split("\\s*-\\s*"); return a.length>=2?new String[]{a[0],a[1]}:new String[]{"0","0"}; }
+    private static String[] pairFrom(JSONObject o, String[] pairKeys, String[] p1Keys, String[] p2Keys) {
+        for(String k:pairKeys){ String v=clean(o.optString(k,"")); if(!v.isEmpty()) return splitPair(v); }
+        String a="",b=""; for(String k:p1Keys){a=clean(o.optString(k,""));if(!a.isEmpty())break;} for(String k:p2Keys){b=clean(o.optString(k,""));if(!b.isEmpty())break;}
+        return new String[]{a.isEmpty()?"0":a,b.isEmpty()?"0":b};
+    }
+    private static String[] setScores(JSONObject o, String[] current) {
+        StringBuilder a=new StringBuilder(), b=new StringBuilder();
+        for(int n=1;n<=5;n++) {
+            String raw=first(o,"set"+n+"_score","set_"+n+"_score","score_set"+n);
+            if(raw.isEmpty()) continue; String[] p=splitPair(raw);
+            if(a.length()>0){a.append(" ");b.append(" ");} a.append(p[0]);b.append(p[1]);
+        }
+        if(a.length()==0) return current; return new String[]{a.toString(),b.toString()};
+    }
+    private static int tennisPoint(String p) { String s=clean(p).toUpperCase(Locale.US); if(s.equals("A")||s.equals("AD")) return 4; try{int n=Integer.parseInt(s); if(n==40)return 3;if(n==30)return 2;if(n==15)return 1;if(n>3)return n;}catch(Exception e){} return 0; }
+    private static boolean isBreakPoint(String p1, String p2, int server) {
+        if(server==0) return false; int a=tennisPoint(p1),b=tennisPoint(p2); int r=server==1?b:a, sv=server==1?a:b;
+        return (r>=3 && r>sv) || (r==3 && sv<=2);
     }
 
     private static String shortStage(String stage) {

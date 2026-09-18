@@ -112,3 +112,9 @@ V47 : reprise automatique des envois Drive sur erreurs réseau temporaires (4 te
 - versionName Android : 1.0.11.
 - versionCode Android : 11, strictement supérieur aux versions précédentes afin d’autoriser les mises à jour.
 - Signature permanente GitHub Actions conservée.
+
+## V1.13
+- Matchs d'entraînement en faux direct à partir de `timported.match_states`, dans l'ordre `state_number`.
+- Chaque ligne affiche les deux joueurs, la balle 🎾 du serveur, BREAK clignotant, sets gagnés, jeux par set et points courants.
+- Aucun état futur n'est affiché avant son tour dans le replay.
+- versionName 1.0.13 / versionCode 13.
