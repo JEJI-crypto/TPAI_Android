@@ -24,7 +24,6 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -49,6 +48,8 @@ public class MainActivity extends Activity {
         String live2 = "";
         String stage = "";
         String score = "";
+        String competitionKey = "";
+        String competitionHeader = "";
     }
 
     @Override public void onCreate(Bundle state) {
@@ -76,7 +77,7 @@ public class MainActivity extends Activity {
         menu.setContentDescription("Menu");
         topBar.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
 
-        TextView app = text("TPAI_Android  •  V1.11", 13, Color.rgb(146,154,164), Typeface.BOLD);
+        TextView app = text("TPAI_Android  •  V1.12", 13, Color.rgb(146,154,164), Typeface.BOLD);
         topBar.addView(app, new LinearLayout.LayoutParams(0, dp(42), 1));
         root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(42)));
 
@@ -131,7 +132,6 @@ public class MainActivity extends Activity {
             @Override public void run() {
             try {
                 List<MatchItem> items = fetchLiveMatches();
-                Collections.shuffle(items);
                 if (items.size() > MAX_MATCHES) items = new ArrayList<>(items.subList(0, MAX_MATCHES));
                 final List<MatchItem> finalItems = items;
                 main.post(new Runnable() {
@@ -173,11 +173,15 @@ public class MainActivity extends Activity {
 
             MatchItem m = new MatchItem();
             m.code = String.valueOf(matchId);
+            String editionId = clean(row.optString("edition_id", ""));
+            String matchDate = clean(row.optString("match_date", ""));
+            m.competitionKey = editionId.isEmpty() ? matchDate : editionId;
+            m.competitionHeader = editionId.isEmpty() ? "MATCHS D’ENTRAÎNEMENT" : "TOURNOI • " + editionId;
             m.player1 = playerName(row.optLong("player1_id", -1L), "Joueur 1");
             m.player2 = playerName(row.optLong("player2_id", -1L), "Joueur 2");
             m.live1 = a;
             m.live2 = b;
-            String d = clean(row.optString("match_date", ""));
+            String d = matchDate;
             String t = clean(row.optString("match_time", ""));
             m.stage = d + (t.isEmpty() ? "" : "  " + t);
             m.score = "LIVE réel • état " + live.optInt("state_number", 0);
@@ -314,32 +318,90 @@ public class MainActivity extends Activity {
             return;
         }
         status.setText("Liste chargée depuis timported");
-        for (MatchItem m : items) list.addView(matchCard(m), new LinearLayout.LayoutParams(-1, -2));
+        String currentCompetition = null;
+        for (MatchItem m : items) {
+            if (currentCompetition == null || !currentCompetition.equals(m.competitionKey)) {
+                currentCompetition = m.competitionKey;
+                list.addView(competitionHeader(m.competitionHeader));
+            }
+            list.addView(matchRow(m));
+        }
     }
 
-    private View matchCard(MatchItem m) {
-        LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setBackgroundColor(Color.rgb(27,31,35));
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2); cp.setMargins(0,0,0,dp(8)); card.setLayoutParams(cp);
-
-        TextView meta = text((m.stage.isEmpty()?"MATCH D’ENTRAÎNEMENT":m.stage) + (m.score.isEmpty()?"":"  •  " + m.score), 11, Color.rgb(150,158,166), Typeface.BOLD);
-        card.addView(meta);
-        card.addView(playerLine(m.player1, m.live1));
-        card.addView(playerLine(m.player2, m.live2));
-        TextView code = text(m.code, 10, Color.rgb(105,113,121), Typeface.NORMAL); code.setGravity(Gravity.RIGHT);
-        card.addView(code);
-        return card;
+    private View competitionHeader(String label) {
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(9), 0, dp(9), 0);
+        header.setBackgroundColor(Color.rgb(25, 91, 68));
+        TextView gender = text("●", 11, Color.rgb(174,239,208), Typeface.BOLD);
+        gender.setGravity(Gravity.CENTER);
+        header.addView(gender, new LinearLayout.LayoutParams(dp(22), dp(30)));
+        TextView title = text(valueOr(label, "MATCHS D’ENTRAÎNEMENT"), 12, Color.WHITE, Typeface.BOLD);
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(30), 1));
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(-1, dp(30));
+        hp.setMargins(0, dp(3), 0, 0);
+        header.setLayoutParams(hp);
+        return header;
     }
 
-    private View playerLine(String player, String odd) {
-        LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
-        TextView name = text(player, 16, Color.WHITE, Typeface.BOLD);
-        row.addView(name, new LinearLayout.LayoutParams(0, dp(38), 1));
-        TextView live = text("LIVE  " + formatOdd(odd), 14, Color.rgb(57,255,136), Typeface.BOLD);
-        live.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
-        row.addView(live, new LinearLayout.LayoutParams(dp(112), dp(38)));
-        return row;
+    private View matchRow(MatchItem m) {
+        LinearLayout line = new LinearLayout(this);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        line.setPadding(dp(4), dp(3), dp(7), dp(3));
+        line.setBackgroundColor(Color.rgb(27,31,35));
+
+        TextView star = text("☆", 19, Color.rgb(220,228,234), Typeface.NORMAL);
+        star.setGravity(Gravity.CENTER);
+        line.addView(star, new LinearLayout.LayoutParams(dp(36), dp(62)));
+
+        LinearLayout center = new LinearLayout(this);
+        center.setOrientation(LinearLayout.VERTICAL);
+        center.setGravity(Gravity.CENTER_VERTICAL);
+        TextView p1 = text(m.player1, 14, Color.WHITE, Typeface.BOLD);
+        TextView p2 = text(m.player2, 14, Color.WHITE, Typeface.BOLD);
+        center.addView(p1, new LinearLayout.LayoutParams(-1, dp(27)));
+        center.addView(p2, new LinearLayout.LayoutParams(-1, dp(27)));
+        line.addView(center, new LinearLayout.LayoutParams(0, dp(62), 1));
+
+        LinearLayout odds = new LinearLayout(this);
+        odds.setOrientation(LinearLayout.VERTICAL);
+        odds.setGravity(Gravity.CENTER);
+        TextView o1 = text(formatOdd(m.live1), 14, Color.rgb(255,214,64), Typeface.BOLD);
+        TextView o2 = text(formatOdd(m.live2), 14, Color.rgb(255,214,64), Typeface.BOLD);
+        o1.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+        o2.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+        odds.addView(o1, new LinearLayout.LayoutParams(-1, dp(27)));
+        odds.addView(o2, new LinearLayout.LayoutParams(-1, dp(27)));
+        line.addView(odds, new LinearLayout.LayoutParams(dp(62), dp(62)));
+
+        LinearLayout meta = new LinearLayout(this);
+        meta.setOrientation(LinearLayout.VERTICAL);
+        meta.setGravity(Gravity.CENTER);
+        TextView st = text("ST", 10, Color.rgb(174,239,208), Typeface.BOLD);
+        st.setGravity(Gravity.CENTER);
+        TextView time = text(shortStage(m.stage), 9, Color.rgb(150,158,166), Typeface.NORMAL);
+        time.setGravity(Gravity.CENTER);
+        meta.addView(st, new LinearLayout.LayoutParams(-1, dp(27)));
+        meta.addView(time, new LinearLayout.LayoutParams(-1, dp(27)));
+        line.addView(meta, new LinearLayout.LayoutParams(dp(58), dp(62)));
+
+        View separator = new View(this);
+        separator.setBackgroundColor(Color.rgb(48,54,60));
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setOrientation(LinearLayout.VERTICAL);
+        wrapper.addView(line, new LinearLayout.LayoutParams(-1, dp(62)));
+        wrapper.addView(separator, new LinearLayout.LayoutParams(-1, dp(1)));
+        return wrapper;
+    }
+
+    private static String shortStage(String stage) {
+        String s = clean(stage);
+        if (s.length() >= 10) {
+            String time = s.substring(10).trim();
+            if (!time.isEmpty()) return time.length() > 5 ? time.substring(0,5) : time;
+        }
+        return s;
     }
 
     private void showError(Exception e) {
