@@ -76,7 +76,7 @@ public class MainActivity extends Activity {
         menu.setContentDescription("Menu");
         topBar.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
 
-        TextView app = text("TPAI_Android", 13, Color.rgb(146,154,164), Typeface.BOLD);
+        TextView app = text("TPAI_Android  •  V1.11", 13, Color.rgb(146,154,164), Typeface.BOLD);
         topBar.addView(app, new LinearLayout.LayoutParams(0, dp(42), 1));
         root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(42)));
 

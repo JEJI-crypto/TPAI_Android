@@ -105,3 +105,10 @@ V47 : reprise automatique des envois Drive sur erreurs réseau temporaires (4 te
 - Recherche d'abord `players.player_name`, puis toutes les entrées `player_sources` du joueur.
 - Si le joueur canonique porte encore un libellé technique Trefík, recherche aussi par `trefik_player_id` / `source_player_id` afin de retrouver un éventuel joueur déjà nommé par une autre source.
 - Aucun nom n'est inventé : si `timported` ne contient réellement aucun nom, le libellé technique est conservé.
+
+
+## V1.11
+- Numéro de version visible en permanence en haut de l’application : V1.11.
+- versionName Android : 1.0.11.
+- versionCode Android : 11, strictement supérieur aux versions précédentes afin d’autoriser les mises à jour.
+- Signature permanente GitHub Actions conservée.
