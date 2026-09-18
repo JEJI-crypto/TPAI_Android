@@ -5,9 +5,13 @@ on:
   push:
     branches: [ "main", "master" ]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,15 +27,23 @@ jobs:
         with:
           gradle-version: '6.7.1'
 
-      - name: Build debug APK
+      - name: Build APK
         run: gradle --no-daemon assembleDebug
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk TPAI_Android-debug.apk
+      - name: Prepare APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk TPAI_Android.apk
 
-      - name: Upload APK
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TPAI_Android-APK
-          path: TPAI_Android-debug.apk
-          if-no-files-found: error
+          path: TPAI_Android.apk
+
+      - name: Publish latest APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: TPAI Android - Dernière version
+          prerelease: false
+          make_latest: true
+          files: TPAI_Android.apk
