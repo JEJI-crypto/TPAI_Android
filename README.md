@@ -72,3 +72,11 @@ L'onglet PRÉPARATION IA est fusionné dans RÉÉCRITURE. Étape 1 génère les 
 
 
 V47 : reprise automatique des envois Drive sur erreurs réseau temporaires (4 tentatives) ; les erreurs techniques de lecture Drive restent dans JOURNAL et ne remplacent plus le dernier état valide affiché dans le suivi.
+
+
+## V1.6 — structure timported canonique
+- Sélection dans `timported.matches` avec `has_live_odds=TRUE`.
+- Lecture des vraies cotes dans `timported.live_odds` par `match_id` et dernier `state_number`.
+- Lecture des noms via `timported.players`.
+- Aucune estimation/reconstruction des cotes LIVE.
+- Nécessite que le schéma `timported` soit exposé dans Supabase Data API et lisible par le rôle utilisé.

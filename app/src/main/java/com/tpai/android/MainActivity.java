@@ -138,40 +138,85 @@ public class MainActivity extends Activity {
     }
 
     private List<MatchItem> fetchLiveMatches() throws Exception {
-        // Source unique : schéma PostgreSQL/Supabase timported.
-        // On demande directement le Déroulement car c'est là que le Client PC lit
-        // matchs_j1_cote_direct / matchs_j2_cote_direct.
-        String select = "matchs_code,matchs_j1_nom,matchs_j2_nom,matchs_j1_cote_direct,matchs_j2_cote_direct,matchs_set,matchs_score_final";
-        String query = "/rest/v1/Tennis_matchs_deroulement?select=" + enc(select)
-                + "&matchs_j1_cote_direct=not.is.null&matchs_j2_cote_direct=not.is.null"
-                + "&limit=250";
-        JSONArray rows;
-        try {
-            rows = getJson(query);
-        } catch (Exception first) {
-            // Compatibilité si les champs set/score portent des noms plus courts.
-            select = "matchs_code,matchs_j1_nom,matchs_j2_nom,matchs_j1_cote_direct,matchs_j2_cote_direct";
-            query = "/rest/v1/Tennis_matchs_deroulement?select=" + enc(select)
-                    + "&matchs_j1_cote_direct=not.is.null&matchs_j2_cote_direct=not.is.null"
-                    + "&limit=250";
-            rows = getJson(query);
-        }
-        List<MatchItem> out = new ArrayList<>();
-        for (int i=0; i<rows.length(); i++) {
-            JSONObject o = rows.getJSONObject(i);
-            String a = clean(o.optString("matchs_j1_cote_direct", ""));
-            String b = clean(o.optString("matchs_j2_cote_direct", ""));
+        // V1.6 — structure canonique confirmée par l'Admin PostgreSQL/Trefík.
+        // matches.has_live_odds n'est vrai que lorsque des lignes existent réellement
+        // dans timported.live_odds. Aucune cote n'est reconstruite sur Android.
+        JSONArray matches = getJson("/rest/v1/matches?select=" + enc(
+                "match_id,player1_id,player2_id,match_date,match_time,edition_id,opening_odds_player1,opening_odds_player2")
+                + "&has_live_odds=eq.true&order=match_date.desc,match_time.desc&limit=80");
+
+        List<MatchItem> out = new ArrayList<MatchItem>();
+        for (int i = 0; i < matches.length(); i++) {
+            JSONObject row = matches.getJSONObject(i);
+            long matchId = row.optLong("match_id", -1L);
+            if (matchId < 0) continue;
+
+            JSONObject live = latestLiveOdds(matchId);
+            if (live == null) continue;
+            String a = live.optString("_odd1", "");
+            String b = live.optString("_odd2", "");
             if (!realOdd(a) || !realOdd(b)) continue;
+
             MatchItem m = new MatchItem();
-            m.code = clean(o.optString("matchs_code", ""));
-            m.player1 = valueOr(o.optString("matchs_j1_nom", ""), "Joueur 1");
-            m.player2 = valueOr(o.optString("matchs_j2_nom", ""), "Joueur 2");
-            m.live1 = a; m.live2 = b;
-            m.stage = clean(o.optString("matchs_set", ""));
-            m.score = clean(o.optString("matchs_score_final", ""));
-            if (!m.code.isEmpty()) out.add(m);
+            m.code = String.valueOf(matchId);
+            m.player1 = playerName(row.optLong("player1_id", -1L), "Joueur 1");
+            m.player2 = playerName(row.optLong("player2_id", -1L), "Joueur 2");
+            m.live1 = a;
+            m.live2 = b;
+            String d = clean(row.optString("match_date", ""));
+            String t = clean(row.optString("match_time", ""));
+            m.stage = d + (t.isEmpty() ? "" : "  " + t);
+            m.score = "LIVE réel • état " + live.optInt("state_number", 0);
+            out.add(m);
+            if (out.size() >= 30) break;
         }
         return out;
+    }
+
+    private JSONObject latestLiveOdds(long matchId) throws Exception {
+        // L'Admin accepte plusieurs noms historiques pour les deux colonnes de cote.
+        // On les essaie dans le même ordre pour rester compatible avec la BDD réelle.
+        String[][] candidates = new String[][] {
+                {"odds_player1", "odds_player2"},
+                {"player1_odds", "player2_odds"},
+                {"odds_p1", "odds_p2"},
+                {"price_player1", "price_player2"},
+                {"home_odds", "away_odds"},
+                {"odd_player1", "odd_player2"}
+        };
+        Exception last = null;
+        for (int i = 0; i < candidates.length; i++) {
+            try {
+                String c1 = candidates[i][0], c2 = candidates[i][1];
+                JSONArray rows = getJson("/rest/v1/live_odds?select=" + enc(
+                        "state_number,bookmaker_id," + c1 + "," + c2)
+                        + "&match_id=eq." + matchId
+                        + "&order=state_number.desc&limit=1");
+                if (rows.length() == 0) return null;
+                JSONObject src = rows.getJSONObject(0);
+                JSONObject dst = new JSONObject(src.toString());
+                dst.put("_odd1", clean(src.optString(c1, "")));
+                dst.put("_odd2", clean(src.optString(c2, "")));
+                return dst;
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+        if (last != null) throw last;
+        return null;
+    }
+
+    private String playerName(long playerId, String fallback) throws Exception {
+        if (playerId < 0) return fallback;
+        try {
+            JSONArray rows = getJson("/rest/v1/players?select=" + enc("player_name")
+                    + "&player_id=eq." + playerId + "&limit=1");
+            if (rows.length() > 0) {
+                String name = clean(rows.getJSONObject(0).optString("player_name", ""));
+                if (!name.isEmpty()) return name;
+            }
+        } catch (Exception ignored) { }
+        return fallback + " #" + playerId;
     }
 
     private JSONArray getJson(String path) throws Exception {
