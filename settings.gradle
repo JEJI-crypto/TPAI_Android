@@ -1,0 +1,2 @@
+rootProject.name = 'TPAI_Android'
+include ':app'

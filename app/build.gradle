@@ -1,0 +1,15 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    compileSdkVersion 30
+
+    defaultConfig {
+        applicationId "com.tpai.android"
+        minSdkVersion 26
+        targetSdkVersion 30
+        versionCode 5
+        versionName "1.0.5"
+    }
+}
