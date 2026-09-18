@@ -91,3 +91,11 @@ V47 : reprise automatique des envois Drive sur erreurs réseau temporaires (4 te
 - Menu hamburger rendu explicitement visible en haut à gauche.
 - Résolution des noms : `players.player_name` en priorité ; si ce nom est encore technique Trefík, recherche d’un vrai `source_player_name` associé au même `player_id` dans `player_sources`.
 - Aucun nom n’est inventé : si `timported` ne contient réellement que le libellé technique, celui-ci reste affiché.
+
+
+## V1.9 — signature Android permanente
+- Build release signé avec la clé permanente `tpai` reconstruite uniquement dans GitHub Actions depuis les Repository Secrets.
+- Aucun keystore ni mot de passe n'est inclus dans le dépôt ou le ZIP.
+- Secrets attendus : `TPAI_KEYSTORE_BASE64` et `TPAI_KEYSTORE_PASSWORD`.
+- APK publié sous le nom stable `TPAI_Android.apk`.
+- Cette version initialise la nouvelle signature permanente ; une dernière désinstallation de l'ancienne signature peut être nécessaire.

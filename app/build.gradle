@@ -5,11 +5,31 @@ plugins {
 android {
     compileSdkVersion 30
 
+    signingConfigs {
+        release {
+            def ksPath = System.getenv("TPAI_KEYSTORE_PATH")
+            def ksPassword = System.getenv("TPAI_KEYSTORE_PASSWORD")
+            if (ksPath != null && ksPassword != null) {
+                storeFile file(ksPath)
+                storePassword ksPassword
+                keyAlias "tpai"
+                keyPassword ksPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
     defaultConfig {
         applicationId "com.tpai.android"
         minSdkVersion 26
         targetSdkVersion 30
-        versionCode 7
-        versionName "1.0.7"
+        versionCode 8
+        versionName "1.0.8"
     }
 }
