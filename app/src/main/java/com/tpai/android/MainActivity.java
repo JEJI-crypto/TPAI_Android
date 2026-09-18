@@ -66,8 +66,13 @@ public class MainActivity extends Activity {
         LinearLayout topBar = new LinearLayout(this);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView menu = text("☰", 27, Color.WHITE, Typeface.NORMAL);
+        Button menu = new Button(this);
+        menu.setText("☰");
+        menu.setTextSize(24);
+        menu.setTextColor(Color.WHITE);
         menu.setGravity(Gravity.CENTER);
+        menu.setPadding(0, 0, 0, 0);
+        menu.setBackgroundColor(Color.TRANSPARENT);
         menu.setContentDescription("Menu");
         topBar.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
 
@@ -217,15 +222,44 @@ public class MainActivity extends Activity {
 
     private String playerName(long playerId, String fallback) throws Exception {
         if (playerId < 0) return fallback;
+
+        String canonical = "";
         try {
             JSONArray rows = getJson("/rest/v1/players?select=" + enc("player_name")
                     + "&player_id=eq." + playerId + "&limit=1");
             if (rows.length() > 0) {
-                String name = clean(rows.getJSONObject(0).optString("player_name", ""));
-                if (!name.isEmpty()) return name;
+                canonical = clean(rows.getJSONObject(0).optString("player_name", ""));
+                if (isRealPlayerName(canonical)) return canonical;
             }
         } catch (Exception ignored) { }
+
+        // Un même joueur canonique peut avoir plusieurs sources. Si le nom principal
+        // est encore le libellé technique Trefík, on préfère un vrai nom déjà connu
+        // dans player_sources (Flashscore/autre source importée), sans l'inventer.
+        try {
+            JSONArray rows = getJson("/rest/v1/player_sources?select=" + enc("source_player_name")
+                    + "&player_id=eq." + playerId + "&limit=20");
+            for (int i = 0; i < rows.length(); i++) {
+                String candidate = clean(rows.getJSONObject(i).optString("source_player_name", ""));
+                if (isRealPlayerName(candidate)) return candidate;
+            }
+        } catch (Exception ignored) { }
+
+        // Le dernier Admin Trefík crée volontairement des noms techniques lorsqu'aucun
+        // vrai nom n'est disponible. Dans ce cas on conserve l'identifiant plutôt que
+        // d'afficher un faux nom.
+        if (!canonical.isEmpty()) return canonical;
         return fallback + " #" + playerId;
+    }
+
+    private boolean isRealPlayerName(String name) {
+        if (name == null) return false;
+        String n = name.trim().toLowerCase(Locale.US);
+        if (n.length() < 2) return false;
+        if (n.startsWith("trefík player #") || n.startsWith("trefik player #")) return false;
+        if (n.startsWith("trefík joueur inconnu") || n.startsWith("trefik joueur inconnu")) return false;
+        if (n.startsWith("joueur 1") || n.startsWith("joueur 2")) return false;
+        return true;
     }
 
     private JSONArray getJson(String path) throws Exception {

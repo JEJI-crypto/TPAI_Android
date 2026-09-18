@@ -85,3 +85,9 @@ V47 : reprise automatique des envois Drive sur erreurs réseau temporaires (4 te
 ## V1.7
 - Ajout d’un bouton menu hamburger (trois barres horizontales) dans le coin supérieur gauche de l’application.
 - Le bouton est visuel dans cette étape de test ; le contenu du menu pourra être ajouté ensuite.
+
+
+## V1.8
+- Menu hamburger rendu explicitement visible en haut à gauche.
+- Résolution des noms : `players.player_name` en priorité ; si ce nom est encore technique Trefík, recherche d’un vrai `source_player_name` associé au même `player_id` dans `player_sources`.
+- Aucun nom n’est inventé : si `timported` ne contient réellement que le libellé technique, celui-ci reste affiché.
