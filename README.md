@@ -99,3 +99,9 @@ V47 : reprise automatique des envois Drive sur erreurs réseau temporaires (4 te
 - Secrets attendus : `TPAI_KEYSTORE_BASE64` et `TPAI_KEYSTORE_PASSWORD`.
 - APK publié sous le nom stable `TPAI_Android.apk`.
 - Cette version initialise la nouvelle signature permanente ; une dernière désinstallation de l'ancienne signature peut être nécessaire.
+
+## V1.10 — noms réels des joueurs LIVE
+- Résolution renforcée des noms dans `timported`.
+- Recherche d'abord `players.player_name`, puis toutes les entrées `player_sources` du joueur.
+- Si le joueur canonique porte encore un libellé technique Trefík, recherche aussi par `trefik_player_id` / `source_player_id` afin de retrouver un éventuel joueur déjà nommé par une autre source.
+- Aucun nom n'est inventé : si `timported` ne contient réellement aucun nom, le libellé technique est conservé.

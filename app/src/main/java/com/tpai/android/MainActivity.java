@@ -224,30 +224,54 @@ public class MainActivity extends Activity {
         if (playerId < 0) return fallback;
 
         String canonical = "";
+        String trefikId = "";
         try {
-            JSONArray rows = getJson("/rest/v1/players?select=" + enc("player_name")
+            JSONArray rows = getJson("/rest/v1/players?select=" + enc("player_name,trefik_player_id")
                     + "&player_id=eq." + playerId + "&limit=1");
             if (rows.length() > 0) {
-                canonical = clean(rows.getJSONObject(0).optString("player_name", ""));
+                JSONObject p = rows.getJSONObject(0);
+                canonical = clean(p.optString("player_name", ""));
+                trefikId = clean(p.optString("trefik_player_id", ""));
                 if (isRealPlayerName(canonical)) return canonical;
             }
         } catch (Exception ignored) { }
 
-        // Un même joueur canonique peut avoir plusieurs sources. Si le nom principal
-        // est encore le libellé technique Trefík, on préfère un vrai nom déjà connu
-        // dans player_sources (Flashscore/autre source importée), sans l'inventer.
+        // 1) Cherche d'abord un vrai nom rattaché au joueur canonique.
         try {
             JSONArray rows = getJson("/rest/v1/player_sources?select=" + enc("source_player_name")
-                    + "&player_id=eq." + playerId + "&limit=20");
+                    + "&player_id=eq." + playerId + "&limit=50");
             for (int i = 0; i < rows.length(); i++) {
                 String candidate = clean(rows.getJSONObject(i).optString("source_player_name", ""));
                 if (isRealPlayerName(candidate)) return candidate;
             }
         } catch (Exception ignored) { }
 
-        // Le dernier Admin Trefík crée volontairement des noms techniques lorsqu'aucun
-        // vrai nom n'est disponible. Dans ce cas on conserve l'identifiant plutôt que
-        // d'afficher un faux nom.
+        // 2) Les imports Trefik peuvent avoir créé un joueur technique alors qu'une autre
+        // source connaît déjà le même identifiant Trefik. On recherche donc aussi par
+        // source_player_id, puis on suit le player_id trouvé vers players/player_sources.
+        if (!trefikId.isEmpty()) {
+            try {
+                JSONArray links = getJson("/rest/v1/player_sources?select=" + enc("player_id,source_player_name")
+                        + "&source_player_id=eq." + enc(trefikId) + "&limit=50");
+                for (int i = 0; i < links.length(); i++) {
+                    JSONObject link = links.getJSONObject(i);
+                    String candidate = clean(link.optString("source_player_name", ""));
+                    if (isRealPlayerName(candidate)) return candidate;
+
+                    long linkedPlayerId = link.optLong("player_id", -1L);
+                    if (linkedPlayerId >= 0 && linkedPlayerId != playerId) {
+                        JSONArray linked = getJson("/rest/v1/players?select=" + enc("player_name")
+                                + "&player_id=eq." + linkedPlayerId + "&limit=1");
+                        if (linked.length() > 0) {
+                            candidate = clean(linked.getJSONObject(0).optString("player_name", ""));
+                            if (isRealPlayerName(candidate)) return candidate;
+                        }
+                    }
+                }
+            } catch (Exception ignored) { }
+        }
+
+        // Aucun vrai nom présent dans timported : ne jamais en inventer un.
         if (!canonical.isEmpty()) return canonical;
         return fallback + " #" + playerId;
     }
