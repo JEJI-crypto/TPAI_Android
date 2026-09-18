@@ -63,8 +63,17 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(11,14,17));
         root.setPadding(dp(12), dp(12), dp(12), dp(10));
 
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView menu = text("☰", 27, Color.WHITE, Typeface.NORMAL);
+        menu.setGravity(Gravity.CENTER);
+        menu.setContentDescription("Menu");
+        topBar.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
+
         TextView app = text("TPAI_Android", 13, Color.rgb(146,154,164), Typeface.BOLD);
-        root.addView(app, new LinearLayout.LayoutParams(-1, dp(26)));
+        topBar.addView(app, new LinearLayout.LayoutParams(0, dp(42), 1));
+        root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(42)));
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);

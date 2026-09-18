@@ -80,3 +80,8 @@ V47 : reprise automatique des envois Drive sur erreurs réseau temporaires (4 te
 - Lecture des noms via `timported.players`.
 - Aucune estimation/reconstruction des cotes LIVE.
 - Nécessite que le schéma `timported` soit exposé dans Supabase Data API et lisible par le rôle utilisé.
+
+
+## V1.7
+- Ajout d’un bouton menu hamburger (trois barres horizontales) dans le coin supérieur gauche de l’application.
+- Le bouton est visuel dans cette étape de test ; le contenu du menu pourra être ajouté ensuite.
