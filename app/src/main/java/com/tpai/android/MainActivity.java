@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
         menu.setContentDescription("Menu");
         topBar.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
 
-        TextView app = text("TPAI_Android  •  V1.14", 13, Color.rgb(146,154,164), Typeface.BOLD);
+        TextView app = text("TPAI_Android  •  V1.15", 13, Color.rgb(146,154,164), Typeface.BOLD);
         topBar.addView(app, new LinearLayout.LayoutParams(0, dp(42), 1));
         root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(42)));
 
@@ -146,21 +146,9 @@ public class MainActivity extends Activity {
             @Override public void run() {
             try {
                 List<MatchItem> candidates = fetchLiveMatches();
-                Collections.shuffle(candidates, random);
-                List<MatchItem> items = new ArrayList<MatchItem>();
-                int take = Math.min(MAX_MATCHES, candidates.size());
-                for (int i = 0; i < take; i++) {
-                    MatchItem m = candidates.get(i);
-                    // Départs répartis dans la chronologie : certains tôt, d'autres au milieu ou plus tard.
-                    if (m.states.size() > 3) {
-                        double band = take <= 1 ? 0.35 : (0.05 + (0.70 * i / (double)(take - 1)));
-                        double jitter = (random.nextDouble() - 0.5) * 0.12;
-                        double ratio = Math.max(0.0, Math.min(0.82, band + jitter));
-                        m.replayStartIndex = Math.min(m.states.size() - 1, (int)Math.floor(ratio * m.states.size()));
-                    }
-                    items.add(m);
-                }
-                Collections.shuffle(items, random);
+                // V1.15 — tirage varié par situation de sets (0-0, 1-0/0-1, 1-1, 2-1, 3-1...).
+                // Le point de départ choisi possède obligatoirement ses DEUX cotes LIVE exactes.
+                List<MatchItem> items = chooseVariedStarts(candidates);
                 final List<MatchItem> finalItems = items;
                 main.post(new Runnable() {
                     @Override public void run() {
@@ -217,6 +205,11 @@ public class MainActivity extends Activity {
             if (m.states.isEmpty()) continue;
             m.oddsHistory = liveOddsHistory(matchId);
             if (m.oddsHistory.isEmpty()) continue;
+            // V1.15 : une image de replay n'existe que si score ET deux cotes LIVE
+            // proviennent exactement du même state_number. On retire aussi les
+            // transitions de points manifestement impossibles (ex. 15-30 -> 30-15).
+            m.states = synchronizedReplayStates(m.states, m.oddsHistory);
+            if (m.states.size() < 2) continue;
             out.add(m);
             if (out.size() >= 60) break;
         }
@@ -543,13 +536,14 @@ public class MainActivity extends Activity {
             statusView.setText("EN DIRECT • état " + s.optInt("state_number", index));
         }
         JSONObject oddsForState(int stateNo) {
-            JSONObject best=null;
+            // V1.15 — jamais de cote héritée d'un état antérieur : correspondance exacte.
             for(int i=0;i<match.oddsHistory.size();i++) {
                 JSONObject o=match.oddsHistory.get(i);
                 int n=o.optInt("state_number",-1);
-                if(n<=stateNo) best=o; else break;
+                if(n==stateNo) return o;
+                if(n>stateNo) break;
             }
-            return best;
+            return null;
         }
         long naturalDelay(JSONObject current) {
             // Rythme irrégulier proche d'un direct : petites variations entre états,
@@ -566,6 +560,65 @@ public class MainActivity extends Activity {
             }
             return d;
         }
+    }
+
+    private List<MatchItem> chooseVariedStarts(List<MatchItem> candidates) {
+        List<MatchItem> pool = new ArrayList<MatchItem>(candidates);
+        Collections.shuffle(pool, random);
+        List<MatchItem> result = new ArrayList<MatchItem>();
+        String[] wanted = new String[]{"0-0","1-0","0-1","1-1","2-0","0-2","2-1","1-2","3-1","1-3","2-2"};
+        Map<String,Boolean> used = new HashMap<String,Boolean>();
+        for (int w=0; w<wanted.length && result.size()<MAX_MATCHES; w++) {
+            for (int i=0; i<pool.size(); i++) {
+                MatchItem m=pool.get(i); int idx=findStartForSetScore(m,wanted[w]);
+                if(idx>=0 && !used.containsKey(m.code)) { m.replayStartIndex=idx; result.add(m); used.put(m.code,Boolean.TRUE); break; }
+            }
+        }
+        // Complément : départs aléatoires mais toujours sur un état synchronisé réel.
+        for (int i=0; i<pool.size() && result.size()<MAX_MATCHES; i++) {
+            MatchItem m=pool.get(i); if(used.containsKey(m.code)||m.states.isEmpty()) continue;
+            int max=Math.max(0,(int)Math.floor((m.states.size()-1)*0.82));
+            m.replayStartIndex=max<=0?0:random.nextInt(max+1);
+            result.add(m); used.put(m.code,Boolean.TRUE);
+        }
+        Collections.shuffle(result,random); return result;
+    }
+
+    private int findStartForSetScore(MatchItem m,String wanted) {
+        List<Integer> hits=new ArrayList<Integer>();
+        for(int i=0;i<m.states.size();i++) {
+            JSONObject s=m.states.get(i);
+            String[] wins=pairFrom(s,new String[]{"sets_score","set_score","sets_won","score_sets"},new String[]{"sets_player1","set_player1","sets1","player1_sets"},new String[]{"sets_player2","set_player2","sets2","player2_sets"});
+            if((wins[0]+"-"+wins[1]).equals(wanted)) hits.add(Integer.valueOf(i));
+        }
+        if(hits.isEmpty()) return -1;
+        // Évite que tous les matchs d'une même strate commencent au même instant.
+        return hits.get(random.nextInt(hits.size())).intValue();
+    }
+
+    private List<JSONObject> synchronizedReplayStates(List<JSONObject> states,List<JSONObject> odds) {
+        Map<Integer,JSONObject> exact=new HashMap<Integer,JSONObject>();
+        for(int i=0;i<odds.size();i++) { JSONObject o=odds.get(i); exact.put(Integer.valueOf(o.optInt("state_number",-1)),o); }
+        List<JSONObject> out=new ArrayList<JSONObject>(); JSONObject previous=null;
+        for(int i=0;i<states.size();i++) {
+            JSONObject cur=states.get(i); int n=cur.optInt("state_number",-1);
+            if(n<0 || !exact.containsKey(Integer.valueOf(n))) continue;
+            if(previous!=null && impossiblePointReversal(previous,cur)) continue;
+            out.add(cur); previous=cur;
+        }
+        return out;
+    }
+
+    private boolean impossiblePointReversal(JSONObject a,JSONObject b) {
+        String[] sa=pairFrom(a,new String[]{"sets_score","set_score","sets_won","score_sets"},new String[]{"sets_player1","set_player1","sets1","player1_sets"},new String[]{"sets_player2","set_player2","sets2","player2_sets"});
+        String[] sb=pairFrom(b,new String[]{"sets_score","set_score","sets_won","score_sets"},new String[]{"sets_player1","set_player1","sets1","player1_sets"},new String[]{"sets_player2","set_player2","sets2","player2_sets"});
+        String[] ga=pairFrom(a,new String[]{"games_score","game_score","score_games","current_set_score"},new String[]{"games_player1","game_player1","games1","player1_games"},new String[]{"games_player2","game_player2","games2","player2_games"});
+        String[] gb=pairFrom(b,new String[]{"games_score","game_score","score_games","current_set_score"},new String[]{"games_player1","game_player1","games1","player1_games"},new String[]{"games_player2","game_player2","games2","player2_games"});
+        if(!sa[0].equals(sb[0])||!sa[1].equals(sb[1])||!ga[0].equals(gb[0])||!ga[1].equals(gb[1])) return false;
+        String[] pa=pairFrom(a,new String[]{"points","points_score","point_score","score_points"},new String[]{"points_player1","point_player1","points1","player1_points"},new String[]{"points_player2","point_player2","points2","player2_points"});
+        String[] pb=pairFrom(b,new String[]{"points","points_score","point_score","score_points"},new String[]{"points_player1","point_player1","points1","player1_points"},new String[]{"points_player2","point_player2","points2","player2_points"});
+        // Dans un même jeu, un seul compteur de points peut changer lors d'un événement.
+        return !pa[0].equals(pb[0]) && !pa[1].equals(pb[1]);
     }
 
     private void stopAllReplays() { for (int i=0;i<replays.size();i++) replays.get(i).stop(); replays.clear(); }
