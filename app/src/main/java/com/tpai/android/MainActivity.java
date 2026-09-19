@@ -1,6 +1,7 @@
 package com.tpai.android;
 
 import android.app.Activity;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -39,8 +40,10 @@ public class MainActivity extends Activity {
     private static final String SUPABASE_PUBLISHABLE_KEY = "sb_publishable_gEReYquGc4yUs1MSDeNztw_FQCpwVuw";
     private static final String SCHEMA = "timported";
     private static final int MAX_MATCHES = 10;
-    private static final int REPLAY_MIN_MS = 4500;
-    private static final int REPLAY_MAX_MS = 12000;
+    private static final int REPLAY_MIN_MS = 9500;
+    private static final int REPLAY_MAX_MS = 22000;
+    private static final String PREFS = "tpai_training";
+    private static final String FAVORITES_KEY = "training_favorites";
     private final Random random = new Random();
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -91,7 +94,7 @@ public class MainActivity extends Activity {
         menu.setContentDescription("Menu");
         topBar.addView(menu, new LinearLayout.LayoutParams(dp(48), dp(42)));
 
-        TextView app = text("TPAI_Android  •  V1.15", 13, Color.rgb(146,154,164), Typeface.BOLD);
+        TextView app = text("TPAI_Android  •  V1.16", 13, Color.rgb(146,154,164), Typeface.BOLD);
         topBar.addView(app, new LinearLayout.LayoutParams(0, dp(42), 1));
         root.addView(topBar, new LinearLayout.LayoutParams(-1, dp(42)));
 
@@ -414,6 +417,17 @@ public class MainActivity extends Activity {
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
 
+        final TextView favorite = text(isFavorite(m.code) ? "★" : "☆", 22, Color.rgb(255,214,64), Typeface.NORMAL);
+        favorite.setGravity(Gravity.CENTER);
+        favorite.setContentDescription("Favori");
+        favorite.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                boolean now = toggleFavorite(m.code);
+                favorite.setText(now ? "★" : "☆");
+            }
+        });
+        top.addView(favorite, new LinearLayout.LayoutParams(dp(30), dp(52)));
+
         LinearLayout names = new LinearLayout(this);
         names.setOrientation(LinearLayout.VERTICAL);
         final TextView p1 = text(m.player1, 13, Color.WHITE, Typeface.BOLD);
@@ -492,9 +506,9 @@ public class MainActivity extends Activity {
 
     private class ReplayController implements Runnable {
         final MatchItem match; final TextView ball1, ball2, sw1, sw2, gs1, gs2, pt1, pt2, odd1, odd2, breakView, statusView;
-        int index; boolean stopped = false; boolean blink = false;
+        int index; boolean stopped = false; boolean blink = false; final int matchBaseDelay;
         ReplayController(MatchItem m, TextView b1, TextView b2, TextView s1, TextView s2, TextView g1, TextView g2, TextView p1, TextView p2, TextView o1, TextView o2, TextView br, TextView st) {
-            match=m; ball1=b1; ball2=b2; sw1=s1; sw2=s2; gs1=g1; gs2=g2; pt1=p1; pt2=p2; odd1=o1; odd2=o2; breakView=br; statusView=st; index=m.replayStartIndex;
+            match=m; matchBaseDelay = REPLAY_MIN_MS + random.nextInt(REPLAY_MAX_MS-REPLAY_MIN_MS+1); ball1=b1; ball2=b2; sw1=s1; sw2=s2; gs1=g1; gs2=g2; pt1=p1; pt2=p2; odd1=o1; odd2=o2; breakView=br; statusView=st; index=m.replayStartIndex;
         }
         void start() { if (!match.states.isEmpty()) main.postDelayed(this, 500); }
         void stop() { stopped=true; main.removeCallbacks(this); }
@@ -505,7 +519,7 @@ public class MainActivity extends Activity {
         }
         void applyState(JSONObject s) {
             String server = first(s, "server", "service", "server_player", "serving_player", "serveur").toUpperCase(Locale.US);
-            int side = sideOf(server);
+            int side = serverSide(s, server);
             ball1.setVisibility(side==1 ? View.VISIBLE : View.INVISIBLE); ball2.setVisibility(side==2 ? View.VISIBLE : View.INVISIBLE);
 
             String[] wins = pairFrom(s, new String[]{"sets_score","set_score","sets_won","score_sets"}, new String[]{"sets_player1","set_player1","sets1","player1_sets"}, new String[]{"sets_player2","set_player2","sets2","player2_sets"});
@@ -548,7 +562,8 @@ public class MainActivity extends Activity {
         long naturalDelay(JSONObject current) {
             // Rythme irrégulier proche d'un direct : petites variations entre états,
             // pauses plus longues lors d'un changement de jeu/set.
-            long d=REPLAY_MIN_MS + random.nextInt(REPLAY_MAX_MS-REPLAY_MIN_MS+1);
+            long d=matchBaseDelay + random.nextInt(5001) - 2500;
+            if (d < REPLAY_MIN_MS) d = REPLAY_MIN_MS;
             if(index<match.states.size()) {
                 JSONObject next=match.states.get(index);
                 String cg=first(current,"games_score","game_score","score_games","current_set_score");
@@ -622,6 +637,29 @@ public class MainActivity extends Activity {
     }
 
     private void stopAllReplays() { for (int i=0;i<replays.size();i++) replays.get(i).stop(); replays.clear(); }
+
+    private static int serverSide(JSONObject state, String raw) {
+        int side = sideOf(raw);
+        if (side != 0) return side;
+        if (state.optBoolean("server1", false) || state.optBoolean("player1_serving", false) || state.optBoolean("j1_service", false)) return 1;
+        if (state.optBoolean("server2", false) || state.optBoolean("player2_serving", false) || state.optBoolean("j2_service", false)) return 2;
+        String s1 = first(state, "server_side", "service_side", "service_player");
+        return sideOf(s1);
+    }
+
+    private boolean isFavorite(String code) {
+        return getPreferences(MODE_PRIVATE).getStringSet(FAVORITES_KEY, new java.util.HashSet<String>()).contains(clean(code));
+    }
+
+    private boolean toggleFavorite(String code) {
+        SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        java.util.Set<String> current = new java.util.HashSet<String>(prefs.getStringSet(FAVORITES_KEY, new java.util.HashSet<String>()));
+        String c = clean(code);
+        boolean add = !current.contains(c);
+        if (add) current.add(c); else current.remove(c);
+        prefs.edit().putStringSet(FAVORITES_KEY, current).apply();
+        return add;
+    }
 
     private static int sideOf(String v) {
         String s=clean(v).toLowerCase(Locale.US);
