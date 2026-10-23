@@ -37,12 +37,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.23 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.24 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres, non le moteur PC PBP complet.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V123_ESTIMATED_MENU";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V124_MINIMAL_AUTO4";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -59,7 +59,7 @@ public final class MainActivity extends Activity {
     private final Map<String,String> filters = new HashMap<>();
     private long generation = 0;
     private boolean inProgress = false;
-    private LinearLayout listHost, bannerHost, filterHost, root;
+    private LinearLayout listHost, bannerHost, filterHost, root, transportHost;
     private ScrollView listScroll;
     private TextView status, counter, playbackStatus;
     private CheckBox selectAll;
@@ -105,7 +105,7 @@ public final class MainActivity extends Activity {
         includeEstimated=false; // Toujours décochée au lancement, même si l’utilisateur l’avait cochée.
         buildUi();
         preferences=getSharedPreferences("tpai_training_selection",MODE_PRIVATE);
-        restoreSelection();
+        addRandom(); // 4 nouveaux matchs à chaque lancement, sans sélection implicite.
         timer.postDelayed(tick, 300);
     }
     @Override protected void onPause() {
@@ -169,103 +169,98 @@ public final class MainActivity extends Activity {
     interface ThrowingJob { void execute() throws Exception; }
 
     private void buildUi() {
-        root=col();root.setBackgroundColor(BG);root.setPadding(dp(9),dp(7),dp(9),dp(7));
+        root=col();root.setBackgroundColor(BG);root.setPadding(dp(10),dp(5),dp(10),dp(5));
         if(Build.VERSION.SDK_INT>=30)root.setOnApplyWindowInsetsListener((v,insets)->{
             android.graphics.Insets p=insets.getInsets(WindowInsets.Type.systemBars());
-            v.setPadding(dp(9)+p.left,dp(7)+p.top,dp(9)+p.right,dp(7)+p.bottom);return insets;});
+            v.setPadding(dp(10)+p.left,dp(5)+p.top,dp(10)+p.right,dp(5)+p.bottom);return insets;});
         setContentView(root);
-        // Menu général unique ☰, extensible sans organisation prématurée.
         LinearLayout topbar=row();
-        Button hamburger=button("☰",0xff192b31);
-        hamburger.setContentDescription("Ouvrir le menu général TPAI");
-        hamburger.setTextSize(23);
-        hamburger.setOnClickListener(v->showMainMenu());
-        margin(hamburger,topbar,49,42,0,0,9,0);
-        TextView title=tv("TPAI  •  V1.23",20,Color.WHITE,true);
-        topbar.addView(title,new LinearLayout.LayoutParams(0,dp(42),1));
-        margin(topbar,root,-1,45,1,0,0,0);
-        subtitleView=tv("MATCHS D’ENTRAÎNEMENT · COTES BOOKER OBSERVÉES",14,GREEN,true);
-        margin(subtitleView,root,-1,29,5,0,0,0);
-        TextView info=tv(BUILD_MARKER+" • lecture distante • sans base locale",10,MUTED,false);
-        margin(info,root,-1,22,5,0,0,2);
-
-        bannerHost=col(); bannerHost.setBackground(bg(0xff070707,0xff26363d,8));
-        margin(bannerHost,root,-1,-2,1,0,1,4);
-        renderBanner();
-
-        HorizontalScrollView h=new HorizontalScrollView(this);h.setHorizontalScrollBarEnabled(false);
-        filterHost=row();h.addView(filterHost);
-        margin(h,root,-1,45,0,3,0,1);
-        makeSelector("Catégories",()->categoryDialog());
-        makeSelector("Tournois",()->tournamentDialog());
-        makeSelector("Saisons",()->seasonDialog());
-        makeSelector("Matchs",()->matchesDialog());
-        makeSelector("Réinit.",()->clearFilters());
-
-        LinearLayout actions=row();
-        Button count=button("4 ▼",0xff192b31);
-        count.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Nombre de matchs aléatoires")
-            .setSingleChoiceItems(new String[]{"1","2","3","4","5","6","7","8","9","10"},randomCount-1,(d,n)->{randomCount=n+1;count.setText(randomCount+" ▼");d.dismiss();})
-            .setNegativeButton("FERMER",null).show());
-        margin(count,actions,66,43,1,0,3,0);
-        randomButton=button("+ ALÉATOIRE",0xff123b52);
-        randomButton.setOnClickListener(v->addRandom());
-        LinearLayout.LayoutParams weight=new LinearLayout.LayoutParams(0,dp(43),1);weight.setMargins(0,0,dp(3),0);actions.addView(randomButton,weight);
-        Button clear=button("Vider",0xff4c1724);clear.setOnClickListener(v->clearTraining());
-        margin(clear,actions,71,43,0,0,1,0);
-        margin(actions,root,-1,45,1,1,1,4);
-
-        LinearLayout searchLine=row();
-        playerSearch=new EditText(this);playerSearch.setSingleLine(true);playerSearch.setTextSize(13);
-        playerSearch.setTextColor(Color.WHITE);playerSearch.setHintTextColor(0xffb4c1c6);
-        playerSearch.setHint("Rechercher un joueur…");
-        playerSearch.setPadding(dp(10),0,dp(7),0);playerSearch.setBackground(bg(0xff101820,0xff3f5460,8));
-        LinearLayout.LayoutParams sw=new LinearLayout.LayoutParams(0,dp(43),1);sw.setMargins(0,0,dp(5),0);searchLine.addView(playerSearch,sw);
-        playerSearch.setOnEditorActionListener((v,a,e)->{searchPlayer();return true;});
-        Button find=button("⌕",0xff153a52);find.setTextSize(23);find.setOnClickListener(v->searchPlayer());
-        margin(find,searchLine,58,43,0,0,0,0);
-        margin(searchLine,root,-1,45,1,0,1,3);
-
-        LinearLayout transport=row();
-        transportButton(transport,"⏪",-1);
-        transportButton(transport,"⏸",0);
-        transportButton(transport,"▶",1);
-        transportButton(transport,"⏹",2);
-        transportButton(transport,"⏩",3);
-        margin(transport,root,-1,42,1,1,1,1);
-        playbackStatus=tv("Sélectionne les matchs à piloter avec les cases ✓",10,0xffa6e3be,false);
-        margin(playbackStatus,root,-1,23,6,0,0,3);
-        playbackStatus.setOnClickListener(v->new AlertDialog.Builder(this)
-            .setTitle("Rythme de lecture des états LIVE")
-            .setItems(new String[]{"RAPIDE · 2,5 s par état", "INSPIRÉ DU PC · 20 s par état, pauses jeu/set"},(d,n)->{
-                pcRhythm=(n==1);
-                tickHistory.clear();
-                updatePlaybackStatus();
-                message(pcRhythm?"Rythme PC : transitions déduites des états enregistrés.":"Lecture rapide des états LIVE.");
-            }).show());
-
-        LinearLayout listBar=row();listBar.setPadding(dp(5),0,dp(4),0);listBar.setBackgroundColor(0xff20252a);
-        selectAll=new CheckBox(this);CheckBox all=selectAll;all.setText("Tous");all.setTextColor(Color.WHITE);all.setTextSize(12);
-        all.setButtonTintList(ColorStateList.valueOf(GREEN));
-        all.setOnClickListener(v->{for(TrainingMatch m:training.values())m.checked=all.isChecked();saveSelection();renderList();});
-        margin(all,listBar,79,42,0,0,0,0);
-        Button del=button("🗑",0xff35202a);del.setOnClickListener(v->deleteChecked());
-        margin(del,listBar,48,36,0,0,0,0);
-        counter=tv("0 match",12,Color.WHITE,true);
-        listBar.addView(counter,new LinearLayout.LayoutParams(0,-1,1));
-        Button expand=button("⛶",0xff30383f);
-        expand.setOnClickListener(v->{ new AlertDialog.Builder(this)
-            .setTitle("Liste d'entraînement").setMessage("Sélectionne un match dans la liste pour afficher son bandeau. Les historiques restent sur Supabase.")
-            .setPositiveButton("OK",null).show(); });
-        margin(expand,listBar,44,36,0,0,0,0);
-        margin(listBar,root,-1,44,1,0,1,2);
-
+        Button hamburger=button("☰",0xff111820);hamburger.setTextSize(22);
+        hamburger.setContentDescription("Menu général");hamburger.setOnClickListener(v->showMainMenu());
+        margin(hamburger,topbar,44,44,0,0,7,0);
+        TextView title=tv("TPAI",20,Color.WHITE,true);
+        topbar.addView(title,new LinearLayout.LayoutParams(0,dp(44),1));
+        Button search=button("⌕",0xff101820);search.setTextSize(26);
+        search.setContentDescription("Rechercher un joueur");search.setOnClickListener(v->showSearchDialog());
+        margin(search,topbar,44,44,2,0,3,0);
+        Button add=button("＋",0xff133443);add.setTextSize(25);
+        add.setContentDescription("Choisir et ajouter des matchs");add.setOnClickListener(v->showAddMenu());
+        margin(add,topbar,44,44,1,0,0,0);
+        margin(topbar,root,-1,47,0,0,0,4);
+        subtitleView=tv("MATCHS D’ENTRAÎNEMENT",12,GREEN,true);
+        margin(subtitleView,root,-1,25,4,0,0,2);
+        // Le bandeau ET les commandes restent invisibles sans sélection explicite.
+        bannerHost=col();bannerHost.setBackground(bg(0xff10151b,0xff26363d,8));
+        margin(bannerHost,root,-1,-2,0,0,0,2);
+        transportHost=col();
+        LinearLayout buttons=row();
+        transportButton(buttons,"⏪",-1);transportButton(buttons,"⏸",0);
+        transportButton(buttons,"▶",1);transportButton(buttons,"⏹",2);transportButton(buttons,"⏩",3);
+        margin(buttons,transportHost,-1,44,0,0,0,0);
+        playbackStatus=tv("Lecture des matchs cochés · appuyer pour changer le rythme",10,MUTED,false);
+        playbackStatus.setGravity(Gravity.CENTER);
+        margin(playbackStatus,transportHost,-1,29,0,0,0,0);
+        playbackStatus.setOnClickListener(v->showRhythmDialog());
+        margin(transportHost,root,-1,-2,0,0,0,4);
+        // Conservés hors écran : les filtres s'ouvrent désormais exclusivement par l'icône +.
+        filterHost=row();
+        playerSearch=new EditText(this);playerSearch.setSingleLine(true);
+        playerSearch.setText(" ");
+        randomButton=button("ALÉATOIRE",0xff123b52);randomButton.setOnClickListener(v->addRandom());
+        LinearLayout listBar=row();listBar.setPadding(dp(3),0,dp(2),0);
+        selectAll=new CheckBox(this);selectAll.setText("Tous");selectAll.setTextColor(Color.WHITE);
+        selectAll.setTextSize(12);selectAll.setButtonTintList(ColorStateList.valueOf(GREEN));
+        selectAll.setOnClickListener(v->{for(TrainingMatch m:training.values())m.checked=selectAll.isChecked();saveSelection();renderList();});
+        margin(selectAll,listBar,94,42,0,0,1,0);
+        counter=tv("0 / 10 matchs",12,Color.WHITE,true);
+        listBar.addView(counter,new LinearLayout.LayoutParams(0,dp(42),1));
+        Button actions=button("⋮",0xff19232b);actions.setTextSize(23);
+        actions.setContentDescription("Options de la liste");actions.setOnClickListener(v->showListMenu());
+        margin(actions,listBar,44,42,0,0,0,0);
+        margin(listBar,root,-1,43,0,0,0,2);
         listScroll=new ScrollView(this);listScroll.setFillViewport(true);
         listHost=col();listScroll.addView(listHost);
         root.addView(listScroll,new LinearLayout.LayoutParams(-1,0,1));
-        status=tv("Prêt. Ajoute jusqu’à 10 matchs via + ou la recherche.",10,MUTED,false);
-        margin(status,root,-1,37,5,2,0,0);
-        renderList();
+        status=tv("Recherche de 4 matchs aux cotes LIVE complètes…",10,MUTED,false);
+        status.setMaxLines(2);margin(status,root,-1,-2,5,3,2,3);
+        renderBanner();renderList();
+    }
+    private void showRhythmDialog(){
+        new AlertDialog.Builder(this).setTitle("Rythme de lecture")
+            .setItems(new String[]{"RAPIDE · 2,5 s par état", "INSPIRÉ DU PC · 20 s par état, pauses jeu/set"},(d,n)->{
+                pcRhythm=n==1;tickHistory.clear();updatePlaybackStatus();
+                message(pcRhythm?"Rythme PC activé.":"Lecture rapide activée.");
+            }).show();
+    }
+    private void showSearchDialog(){
+        EditText entry=new EditText(this);entry.setSingleLine(true);entry.setTextColor(Color.WHITE);
+        entry.setHint("Nom du joueur");entry.setHintTextColor(MUTED);
+        entry.setPadding(dp(16),dp(7),dp(16),dp(7));entry.setTextSize(16);
+        new AlertDialog.Builder(this).setTitle("Rechercher un joueur")
+            .setView(entry).setNegativeButton("ANNULER",null)
+            .setPositiveButton("RECHERCHER",(d,w)->{
+                playerSearch.setText(entry.getText().toString());searchPlayer();
+            }).show();
+    }
+    private void showAddMenu(){
+        new AlertDialog.Builder(this).setTitle("Ajouter des matchs")
+            .setItems(new String[]{"＋ Matchs aléatoires", "Catégories", "Tournois", "Saisons", "Matchs", "Effacer les filtres"},(d,n)->{
+                if(n==0)showRandomOptions();else if(n==1)categoryDialog();else if(n==2)tournamentDialog();
+                else if(n==3)seasonDialog();else if(n==4)matchesDialog();else clearFilters();
+            }).show();
+    }
+    private void showRandomOptions(){
+        String[] opts=new String[10];for(int i=0;i<10;i++)opts[i]=(i+1)+" match"+(i==0?"":"s");
+        new AlertDialog.Builder(this).setTitle("Ajouter des matchs aléatoires")
+            .setSingleChoiceItems(opts,randomCount-1,(d,n)->{randomCount=n+1;d.dismiss();addRandom();})
+            .setNegativeButton("ANNULER",null).show();
+    }
+    private void showListMenu(){
+        new AlertDialog.Builder(this).setTitle("Liste d'entraînement")
+            .setItems(new String[]{"Supprimer les matchs cochés", "Vider la liste (favoris protégés)", "Désélectionner le bandeau", "Rythme de lecture"},(d,n)->{
+                if(n==0)deleteChecked();else if(n==1)clearTraining();else if(n==2){activeId=-1;saveSelection();renderBanner();renderList();}
+                else showRhythmDialog();
+            }).show();
     }
     /** Menu temporaire : toutes les nouvelles options seront ajoutées ici au fur et à mesure. */
     private void showMainMenu() {
@@ -292,8 +287,8 @@ public final class MainActivity extends Activity {
         includeEstimated=allowed;
         filterRevision++;
         if(subtitleView!=null)subtitleView.setText(allowed
-            ?"MATCHS D’ENTRAÎNEMENT · COTES BOOKER + ESTIMATIONS"
-            :"MATCHS D’ENTRAÎNEMENT · COTES BOOKER OBSERVÉES");
+            ?"MATCHS D’ENTRAÎNEMENT · ESTIMATIONS INCLUSES"
+            :"MATCHS D’ENTRAÎNEMENT");
         int removed=0;
         if(!allowed){
             List<Long> invalid=new ArrayList<>();
@@ -554,31 +549,38 @@ public final class MainActivity extends Activity {
         final long revision=filterRevision;
         work("Tirage aléatoire de "+needed+" matchs dans tpai…",()->{
             Map<String,String> base=SupabaseApi.args("select","match_id","order","match_id.asc","limit","1");
-            strictFilters(base,allowEstimates);
             JSONArray min=SupabaseApi.list("matches",base);
             base.put("order","match_id.desc");JSONArray max=SupabaseApi.list("matches",base);
             if(min.length()==0||max.length()==0)throw new Exception("Aucun match avec historique LIVE disponible.");
             long lower=min.getJSONObject(0).optLong("match_id"),upper=max.getJSONObject(0).optLong("match_id");
-            LinkedHashMap<Long,JSONObject> pool=new LinkedHashMap<>();
-            for(int attempt=0;attempt<Math.max(needed*5,15)&&pool.size()<Math.max(needed*5,12);attempt++){
-                long pivot=lower+(long)(random.nextDouble()*(Math.max(1,upper-lower)));
-                Map<String,String> candidateQuery=SupabaseApi.args("select",MATCH_FIELDS,"match_id","gte."+pivot,
-                    "order","match_id.asc","limit","8");
-                strictFilters(candidateQuery,allowEstimates);
-                JSONArray rows=SupabaseApi.list("matches",candidateQuery);
-                for(int k=0;k<rows.length();k++){
-                    JSONObject r=rows.getJSONObject(k);long id=r.optLong("match_id");
-                    if(id>0&&!training.containsKey(id))pool.put(id,r);
-                    if(pool.size()>=Math.max(needed*5,12))break;
-                }
-            }
-            // Aucun match n'est affiché avant vérification de son historique complet.
-            JSONArray picked=new JSONArray();for(JSONObject val:pool.values())picked.put(val);
-            List<TrainingMatch> candidates=resolve(picked,allowEstimates);
             ArrayList<TrainingMatch> accepted=new ArrayList<>();
-            for(TrainingMatch m:candidates){
-                if(accepted.size()>=needed)break;
-                try{loadObservedHistory(m,allowEstimates);accepted.add(m);}catch(Exception rejected){/* Refus silencieux d'un candidat incomplet */}
+            Set<Long> attempted=new HashSet<>();
+            int timedOut=0;
+            // Index match_id : lots courts ; jamais de tri global avec jointure de qualité.
+            for(int attempt=0;attempt<90 && accepted.size()<needed;attempt++){
+                long pivot=lower+(long)(random.nextDouble()*Math.max(1,upper-lower));
+                Map<String,String> q=SupabaseApi.args("select",MATCH_FIELDS,
+                    "match_id","gte."+pivot,"order","match_id.asc","limit","6");
+                JSONArray rows;
+                try {rows=SupabaseApi.list("matches",q);}
+                catch(Exception problem){
+                    if(problem.getMessage()!=null && problem.getMessage().contains("timeout") && timedOut++<5)continue;
+                    throw problem;
+                }
+                JSONArray eligibles=new JSONArray();
+                for(int k=0;k<rows.length();k++){
+                    JSONObject r=rows.getJSONObject(k);long id=r.optLong("match_id",-1);
+                    if(id>0&&!attempted.contains(id)&&!training.containsKey(id)&&eligibleMetadata(r,allowEstimates)){
+                        eligibles.put(r);attempted.add(id);
+                    }
+                }
+                if(eligibles.length()==0)continue;
+                List<TrainingMatch> candidates=resolve(eligibles,allowEstimates);
+                for(TrainingMatch m:candidates){
+                    if(accepted.size()>=needed)break;
+                    try{loadObservedHistory(m,allowEstimates);accepted.add(m);}
+                    catch(Exception rejected){/* historique incomplet : écarté */}
+                }
             }
             ui(()->{
                 if(revision!=filterRevision){message("Filtre modifié : tirage précédent ignoré.");return;}
@@ -590,7 +592,7 @@ public final class MainActivity extends Activity {
     private boolean addMatch(TrainingMatch m) {
         if(m.id<0||training.containsKey(m.id)||training.size()>=MAX_TRAINING||!m.loaded||!m.complete||!eligibleMetadata(m.match))return false;
         training.put(m.id,m);
-        if(activeId<0)activeId=m.id;
+        // Sélection uniquement par appui explicite sur une carte.
         saveSelection();
         // Comme sur le PC, les simulations démarrent sans cocher les cases.
         // Ces cases servent uniquement à désigner les matchs pilotés par les commandes.
@@ -640,7 +642,7 @@ public final class MainActivity extends Activity {
                     m.checked=state.optBoolean("checked",true);
                     addMatch(m);
                 }
-                if(training.containsKey(previouslyActive))activeId=previouslyActive;
+                activeId=-1; // À chaque ouverture, aucune sélection implicite.
                 renderList();renderBanner();message("Sélection restaurée depuis les matchs distants.");
                 if(training.isEmpty())timer.postDelayed(()->addRandom(),100);
             });
@@ -696,7 +698,7 @@ public final class MainActivity extends Activity {
         listHost.removeAllViews();
         counter.setText(training.size()+" / "+MAX_TRAINING+" matchs");
         if(training.isEmpty()){
-            TextView empty=tv("Sélectionne des matchs avec les menus, recherche un joueur ou utilise + ALÉATOIRE.",13,MUTED,false);
+            TextView empty=tv(inProgress?"Recherche de quatre matchs complets en cours…":"Aucun match admissible trouvé. Utilise ＋ pour relancer le tirage.",13,MUTED,false);
             empty.setGravity(Gravity.CENTER);margin(empty,listHost,-1,115,12,15,12,0);return;
         }
         String lastTournament="";
@@ -705,7 +707,7 @@ public final class MainActivity extends Activity {
                 lastTournament=m.tournament;
                 TextView header=tv("🏆  "+lastTournament,12,Color.WHITE,true);
                 header.setBackgroundColor(0xff3d4248);header.setPadding(dp(8),dp(5),dp(7),dp(5));
-                margin(header,listHost,-1,33,0,7,0,0);
+                margin(header,listHost,-1,27,0,5,0,0);
             }
             LinearLayout card=col();card.setPadding(dp(5),dp(4),dp(5),dp(4));
             card.setBackground(bg(m.id==activeId?0xff17352c:0xff10151b,m.id==activeId?GREEN:0xff1b2a34,6));
@@ -764,6 +766,8 @@ public final class MainActivity extends Activity {
         if(bannerHost==null)return;
         bannerHost.removeAllViews();
         TrainingMatch m=training.get(activeId);
+        bannerHost.setVisibility(m==null?View.GONE:View.VISIBLE);
+        if(transportHost!=null)transportHost.setVisibility(m==null?View.GONE:View.VISIBLE);
         if(m==null){
             TextView label=tv("AUCUN MATCH SÉLECTIONNÉ",13,MUTED,true);label.setGravity(Gravity.CENTER);
             margin(label,bannerHost,-1,64,4,1,4,0);
