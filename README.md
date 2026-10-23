@@ -4,7 +4,7 @@ Application Android Java sans base locale, sans connexion PostgreSQL directe.
 Les listes, les fiches et les historiques sont lus sur l'API REST native Supabase
 avec une clé publiable. Aucun secret PostgreSQL dans l'APK.
 
-## Correction V1.14
+## Correction V1.18
 
 La fiche match n'utilise plus `select=*`. Elle sélectionne exclusivement
 les colonnes publiques de `TPAI_REST_COLONNES_V4.sql`. Cela permet les GRANT

@@ -1,8 +1,9 @@
-.gradle/
-.idea/
-local.properties
-**/build/
-*.iml
-Connection.env
 *.jks
 *.keystore
+*.env
+Connexion.env
+Connection.env
+.gradle/
+/build/
+/app/build/
+*.apk
