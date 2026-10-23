@@ -3,33 +3,37 @@ plugins {
 }
 
 android {
-    compileSdkVersion 30
+    namespace 'com.tpai.android'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.tpai.android'
+        minSdk 26
+        targetSdk 36
+        versionCode 14
+        versionName '1.0.14'
+    }
 
     signingConfigs {
         release {
-            def ksPath = System.getenv("TPAI_KEYSTORE_PATH")
-            def ksPassword = System.getenv("TPAI_KEYSTORE_PASSWORD")
-            if (ksPath != null && ksPassword != null) {
-                storeFile file(ksPath)
-                storePassword ksPassword
-                keyAlias "tpai"
-                keyPassword ksPassword
+            def path = System.getenv('TPAI_KEYSTORE_PATH')
+            def pwd = System.getenv('TPAI_KEYSTORE_PASSWORD')
+            if (path != null && pwd != null) {
+                storeFile file(path)
+                storePassword pwd
+                keyAlias 'tpai'
+                keyPassword pwd
             }
         }
     }
-
     buildTypes {
         release {
             minifyEnabled false
             signingConfig signingConfigs.release
         }
     }
-
-    defaultConfig {
-        applicationId "com.tpai.android"
-        minSdkVersion 26
-        targetSdkVersion 30
-        versionCode 18
-        versionName "1.0.18"
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 }
