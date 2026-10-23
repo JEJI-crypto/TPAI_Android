@@ -1,47 +1,31 @@
-# TPAI Android 1.0.19 — accès distant Supabase / tpai
+# TPAI Android V1.23 — Menu général et filtrage des cotes estimées
 
-Application Android Java sans base locale, sans connexion PostgreSQL directe.
-Les listes, les fiches et les historiques sont lus sur l'API REST native Supabase
-avec une clé publiable. Aucun secret PostgreSQL dans l'APK.
+Projet Android complet destiné à être compilé depuis Termux avec la commande unique `tpai`.
 
-## Correction V1.19
+## Nouveau menu ☰
 
-La fiche match n'utilise plus `select=*`. Elle sélectionne exclusivement
-les colonnes publiques de `TPAI_REST_COLONNES_V4.sql`. Cela permet les GRANT
-PostgreSQL au niveau des colonnes sans exposer les colonnes internes.
-Les fichiers obsolètes de RPC expérimental ont été retirés.
+Tout en haut à gauche : ☰ → case **« Côtes estimées incluses »**.
 
-## Avant de lancer
+- La case est toujours **décochée au lancement**, sans persistance du réglage.
+- Décochée : `tpai.matches.live_status = COMPLETE_OBSERVED`, `has_estimated_live=false`, et aucun `live_states.is_estimated=true`.
+- Cochée : `COMPLETE_OBSERVED` ou `COMPLETE_ESTIMATED` ; les états estimés déjà stockés par Booker sont affichés avec un `*`.
+- Dans les deux cas : `live_missing_points=0`, `live_odds_count=live_states_count`, deux cotes AVM strictement positives, deux cotes LIVE valides à chaque état chargé, et nombre total d'états conforme ; aucune cote n'est estimée ni inventée par Android.
+- Quand on décoche : suppression immédiate de la liste courante des matchs contenant des cotes estimées (y compris favoris concernés). Ils restent intégralement dans PostgreSQL distant ; les autres restent.
+- Un téléchargement lancé sous l'ancien réglage est ignoré au retour, même si le menu a été modifié pendant son exécution. Les favoris restaurés sont toujours revalidés.
+- Menu temporaire : ajouter les futures options sans classement jusqu'à la réorganisation finale demandée.
 
-1. Ajoute `tpai` aux *Exposed schemas* du Dashboard Supabase.
-2. Effectue l'audit `(v4)TPAI_Acces_REST.py` dans Termux/Download.
-3. Après vérification du rapport et de l'usage public prévu des données,
-   applique les GRANT/RLS avec `--apply`, puis relance l'audit sans --apply.
-4. Téléverse le projet Android sur le dépôt de compilation GitHub déjà en place.
+Les autres fonctions « Matchs d'entraînement » de V1.22 sont maintenues : sélection maximale 10 matchs, 4 tirages aléatoires au lancement, filtres catégories/tournois/saisons, recherche joueur, contrôles de lecture, favoris, scores, détail des jeux.
 
-## Accès
+## Accès réseau
 
-Six tables mères lisibles en colonnes ciblées: matches, players, competitions,
-live_states, p2p_rows, p2p_games. Pas de SELECT sur les partitions ni
-sur les tables techniques. Pagination des matchs par curseur match_id.
-Aucune base de données, synchronisation ou stockage disque applicatif.
+Exclusivement REST Supabase au schéma `tpai` (tables `matches`, `live_states`, `players`, `competitions`, `p2p_games`). Aucune base locale ni mot de passe PostgreSQL, aucune création/modification de tables. Seuls les ID/favoris/sélections sont mémorisés dans SharedPreferences. Les cotes proviennent de `matches.avm_odd1/2` et `live_states.odd1/2`.
 
-## Limites connues
-
-La recherche de joueurs dans ce prototype est limitée aux 30 premiers IDs
-correspondants ; elle ne garantit pas une recherche exhaustive par nom.
-Tous les matchs restent parcourables par pagination et filtrables par ID/date.
-Compilation et tests d'intégration à exécuter sur GitHub + appareil Android.
-API publique : validation des droits de rediffusion et anti-abus avant Play Store.
+L'état `COMPLETE_ESTIMATED` décrit la reconstitution d'une ou plusieurs cotes par le processus Booker antérieur, pas une opération de l'application Android.
 
 ## Compilation
 
-GitHub Actions construit l'APK et l'AAB avec les secrets de signature du dépôt.
-versionCode=19, targetSdk=36. L'archive ZIP est du code source, pas un APK compilé.
+Télécharger **TPAI_Android_GitHub_V1.23.zip** dans `Download` et exécuter uniquement `tpai` dans Termux. GitHub Actions doit produire `TPAI_Android_V1.23.apk` et `TPAI_Android.aab`.
 
-## Correctif de compilation V1.19 (2026-10-23)
+## Contrôle de qualité
 
-Le workflow utilisait android-actions/setup-android@v3 sans option packages ;
-celui-ci tentait d'installer l'ancien paquet Android `tools`, retire du depot SDK.
-Passage a setup-android@v4 avec `packages: platform-tools` pour ne plus demander `tools`.
-Le build effectif doit toujours etre valide par GitHub Actions.
+Contrôles locaux sources/compilation Java stubs ; **APK GitHub et comportement sur téléphone non vérifiés avant exécution de `tpai`**.
