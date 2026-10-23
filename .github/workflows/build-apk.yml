@@ -34,12 +34,12 @@ jobs:
         run: |
           test -n "$TPAI_KEYSTORE_BASE64"
           printf '%s' "$TPAI_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tpai-release.jks"
-      - name: Verifier exactement les sources V1.24
+      - name: Verifier exactement les sources V1.25
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fq 'TPAI_BUILD_V124_MINIMAL_AUTO4' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'versionCode 24' app/build.gradle
+          grep -Fq 'TPAI_BUILD_V125_COMPACT_PC_LIST' app/src/main/java/com/tpai/android/MainActivity.java
+          grep -Fq 'versionCode 25' app/build.gradle
           grep -Fq "versionName '1.0.24'" app/build.gradle
           grep -Fq '"Accept-Profile", "tpai"' app/src/main/java/com/tpai/android/SupabaseApi.java
           grep -Fq 'MATCHS D’ENTRAÎNEMENT' app/src/main/java/com/tpai/android/MainActivity.java
@@ -62,9 +62,9 @@ jobs:
       - name: Nommer les sorties
         run: |
           cp app/build/outputs/apk/release/app-release.apk TPAI_Android.apk
-          cp TPAI_Android.apk TPAI_Android_V1.24.apk
+          cp TPAI_Android.apk TPAI_Android_V1.25.apk
           cp app/build/outputs/bundle/release/app-release.aab TPAI_Android.aab
-      - name: Verifier le contenu REEL de l APK V1.24
+      - name: Verifier le contenu REEL de l APK V1.25
         run: |
           python3 - <<'PYBUILD'
           from zipfile import ZipFile
@@ -73,7 +73,7 @@ jobs:
           assert apk.is_file() and apk.stat().st_size > 10000, 'APK absent ou anormalement petit'
           with ZipFile(apk) as z:
               dex=b''.join(z.read(n) for n in z.namelist() if n.startswith('classes') and n.endswith('.dex'))
-          assert b'TPAI_BUILD_V124_MINIMAL_AUTO4' in dex, 'ECHEC: l APK ne contient pas la nouvelle interface V1.24'
+          assert b'TPAI_BUILD_V125_COMPACT_PC_LIST' in dex, 'ECHEC: l APK ne contient pas la nouvelle interface V1.25'
           assert b'Accept-Profile' in dex, 'ECHEC: API REST attendue absente'
           print('VERIFIE: APK contient la nouvelle interface et l acces REST tpai')
           PYBUILD
@@ -81,10 +81,10 @@ jobs:
       - name: Archives GitHub Actions
         uses: actions/upload-artifact@v4
         with:
-          name: TPAI_Android_V1.24
+          name: TPAI_Android_V1.25
           path: |
             TPAI_Android.apk
-            TPAI_Android_V1.24.apk
+            TPAI_Android_V1.25.apk
             TPAI_Android.aab
           if-no-files-found: error
       - name: Publication GitHub APK et AAB
@@ -96,16 +96,16 @@ jobs:
           make_latest: true
           files: |
             TPAI_Android.apk
-            TPAI_Android_V1.24.apk
+            TPAI_Android_V1.25.apk
             TPAI_Android.aab
 
-      - name: Publication versionnee independante V1.24
+      - name: Publication versionnee independante V1.25
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: android-v1.24
-          name: TPAI Android V1.24 - Matchs entraînement REST tpai
+          tag_name: android-v1.25
+          name: TPAI Android V1.25 - Matchs entraînement REST tpai
           prerelease: false
           files: |
             TPAI_Android.apk
-            TPAI_Android_V1.24.apk
+            TPAI_Android_V1.25.apk
             TPAI_Android.aab

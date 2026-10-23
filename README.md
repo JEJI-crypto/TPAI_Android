@@ -1,4 +1,4 @@
-# TPAI Android V1.24 — Interface minimaliste
+# TPAI Android V1.25 — Interface minimaliste
 
 - Menu ☰ et filtre « Côtes estimées incluses », décoché au lancement.
 - Recherche ⌕ et ajout ＋ dans la barre supérieure.
