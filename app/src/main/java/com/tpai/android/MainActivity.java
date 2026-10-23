@@ -27,7 +27,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.18 : uniquement HTTP REST sur PostgreSQL distant. Aucune base locale. */
+/** TPAI V1.19 : uniquement HTTP REST sur PostgreSQL distant. Aucune base locale. */
 public final class MainActivity extends Activity {
     private static final int PAGE_SIZE = 40;
     private static final int HISTORY_PAGE = 40;
@@ -79,9 +79,9 @@ public final class MainActivity extends Activity {
             });
         }
 
-        TextView title = txt("TPAI  ·  V1.18  ·  TOUS LES MATCHS", 19, Color.WHITE, Typeface.BOLD);
+        TextView title = txt("TPAI  ·  V1.19  ·  TOUS LES MATCHS", 19, Color.WHITE, Typeface.BOLD);
         root.addView(title, new LinearLayout.LayoutParams(-1, dp(45)));
-        TextView sub = txt("TPAI_BUILD_V118_REST_TPAI • lecture distante • sans base locale", 11, 0xff9db2ac, 0);
+        TextView sub = txt("TPAI_BUILD_V119_REST_TPAI • lecture distante • sans base locale", 11, 0xff9db2ac, 0);
         root.addView(sub, new LinearLayout.LayoutParams(-1, dp(31)));
 
         LinearLayout filters = new LinearLayout(this);

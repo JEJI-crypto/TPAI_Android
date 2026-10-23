@@ -1,10 +1,10 @@
-# TPAI Android 1.0.14 — accès distant Supabase / tpai
+# TPAI Android 1.0.19 — accès distant Supabase / tpai
 
 Application Android Java sans base locale, sans connexion PostgreSQL directe.
 Les listes, les fiches et les historiques sont lus sur l'API REST native Supabase
 avec une clé publiable. Aucun secret PostgreSQL dans l'APK.
 
-## Correction V1.18
+## Correction V1.19
 
 La fiche match n'utilise plus `select=*`. Elle sélectionne exclusivement
 les colonnes publiques de `TPAI_REST_COLONNES_V4.sql`. Cela permet les GRANT
@@ -37,4 +37,11 @@ API publique : validation des droits de rediffusion et anti-abus avant Play Stor
 ## Compilation
 
 GitHub Actions construit l'APK et l'AAB avec les secrets de signature du dépôt.
-versionCode=14, targetSdk=36. L'archive ZIP est du code source, pas un APK compilé.
+versionCode=19, targetSdk=36. L'archive ZIP est du code source, pas un APK compilé.
+
+## Correctif de compilation V1.19 (2026-10-23)
+
+Le workflow utilisait android-actions/setup-android@v3 sans option packages ;
+celui-ci tentait d'installer l'ancien paquet Android `tools`, retire du depot SDK.
+Passage a setup-android@v4 avec `packages: platform-tools` pour ne plus demander `tools`.
+Le build effectif doit toujours etre valide par GitHub Actions.

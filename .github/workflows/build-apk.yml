@@ -21,7 +21,10 @@ jobs:
         with:
           gradle-version: '8.13'
       - name: Installer Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false' 
       - name: Android SDK 36
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - name: Installer la cle de signature permanente
@@ -31,13 +34,13 @@ jobs:
         run: |
           test -n "$TPAI_KEYSTORE_BASE64"
           printf '%s' "$TPAI_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tpai-release.jks"
-      - name: Verifier exactement les sources V1.18
+      - name: Verifier exactement les sources V1.19
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fq 'TPAI_BUILD_V118_REST_TPAI' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'versionCode 18' app/build.gradle
-          grep -Fq "versionName '1.0.18'" app/build.gradle
+          grep -Fq 'TPAI_BUILD_V119_REST_TPAI' app/src/main/java/com/tpai/android/MainActivity.java
+          grep -Fq 'versionCode 19' app/build.gradle
+          grep -Fq "versionName '1.0.19'" app/build.gradle
           grep -Fq '"Accept-Profile", "tpai"' app/src/main/java/com/tpai/android/SupabaseApi.java
           if grep -Fq 'MATCHS D’ENTRAÎNEMENT' app/src/main/java/com/tpai/android/MainActivity.java; then
             echo 'ERREUR: ancienne interface'; exit 1
@@ -51,9 +54,9 @@ jobs:
       - name: Nommer les sorties
         run: |
           cp app/build/outputs/apk/release/app-release.apk TPAI_Android.apk
-          cp TPAI_Android.apk TPAI_Android_V1.18.apk
+          cp TPAI_Android.apk TPAI_Android_V1.19.apk
           cp app/build/outputs/bundle/release/app-release.aab TPAI_Android.aab
-      - name: Verifier le contenu REEL de l APK V1.18
+      - name: Verifier le contenu REEL de l APK V1.19
         run: |
           python3 - <<'PYBUILD'
           from zipfile import ZipFile
@@ -62,7 +65,7 @@ jobs:
           assert apk.is_file() and apk.stat().st_size > 10000, 'APK absent ou anormalement petit'
           with ZipFile(apk) as z:
               dex=b''.join(z.read(n) for n in z.namelist() if n.startswith('classes') and n.endswith('.dex'))
-          assert b'TPAI_BUILD_V118_REST_TPAI' in dex, 'ECHEC: l APK ne contient pas la nouvelle interface V1.18'
+          assert b'TPAI_BUILD_V119_REST_TPAI' in dex, 'ECHEC: l APK ne contient pas la nouvelle interface V1.19'
           assert b'Accept-Profile' in dex, 'ECHEC: API REST attendue absente'
           print('VERIFIE: APK contient la nouvelle interface et l acces REST tpai')
           PYBUILD
@@ -70,10 +73,10 @@ jobs:
       - name: Archives GitHub Actions
         uses: actions/upload-artifact@v4
         with:
-          name: TPAI_Android_V1.18
+          name: TPAI_Android_V1.19
           path: |
             TPAI_Android.apk
-            TPAI_Android_V1.18.apk
+            TPAI_Android_V1.19.apk
             TPAI_Android.aab
           if-no-files-found: error
       - name: Publication GitHub APK et AAB
@@ -85,16 +88,16 @@ jobs:
           make_latest: true
           files: |
             TPAI_Android.apk
-            TPAI_Android_V1.18.apk
+            TPAI_Android_V1.19.apk
             TPAI_Android.aab
 
-      - name: Publication versionnee independante V1.18
+      - name: Publication versionnee independante V1.19
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: android-v1.18
-          name: TPAI Android V1.18 - REST tpai
+          tag_name: android-v1.19
+          name: TPAI Android V1.19 - REST tpai
           prerelease: false
           files: |
             TPAI_Android.apk
-            TPAI_Android_V1.18.apk
+            TPAI_Android_V1.19.apk
             TPAI_Android.aab
