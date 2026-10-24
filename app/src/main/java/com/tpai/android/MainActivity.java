@@ -44,12 +44,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.28 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.29 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres, non le moteur PC PBP complet.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V128_PC_TRAINING_CASCADE";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V129_PC_TRAINING_CASCADE";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -75,6 +75,11 @@ public final class MainActivity extends Activity {
     private String selectedCategory = "", selectedTournament = "", selectedSeason = "";
     private String selectedCategoryLabel="", selectedTournamentLabel="";
     private final Map<String,Bitmap> portraits=new HashMap<>();
+    private final Set<String> loadingPortraits=new HashSet<>();
+    private final Map<Integer,Button> controlButtons=new HashMap<>();
+    private TextView speedIndicator;
+    private boolean blinkOn=true;
+    private int blinkCycle=0;
     private long activeId = -1;
     private int randomCount = 4;
     private String lastPlaybackMode = "Lecture normale";
@@ -202,6 +207,9 @@ public final class MainActivity extends Activity {
         transportButton(buttons,"⏪",-1);transportButton(buttons,"⏸",0);
         transportButton(buttons,"▶",1);transportButton(buttons,"⏹",2);transportButton(buttons,"⏩",3);
         margin(buttons,transportHost,-1,44,0,0,0,0);
+        speedIndicator=tv("",12,GREEN,true);speedIndicator.setGravity(Gravity.CENTER);
+        margin(speedIndicator,transportHost,-1,22,0,0,0,0);
+        speedIndicator.setVisibility(View.GONE);
         playbackStatus=tv("Lecture des matchs cochés · appuyer pour changer le rythme",10,MUTED,false);
         playbackStatus.setGravity(Gravity.CENTER);
         margin(playbackStatus,transportHost,-1,29,0,0,0,0);
@@ -387,6 +395,7 @@ public final class MainActivity extends Activity {
     }
     private void transportButton(LinearLayout host,String symbol,int action){
         Button b=button(symbol,0xff172832);b.setTextSize(19);b.setOnClickListener(v->playback(action));
+        controlButtons.put(action,b);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(39),1);p.setMargins(dp(2),0,dp(2),0);host.addView(b,p);
     }
     private void clearFilters(){selectedCategory="";selectedTournament="";selectedSeason="";message("Filtres réinitialisés.");}
@@ -596,7 +605,8 @@ public final class MainActivity extends Activity {
             }
             JSONArray rows=SupabaseApi.list(table,SupabaseApi.args("select",idCol+",name",idCol,"in.("+buf+")","limit","100"));
             for(int i=0;i<rows.length();i++){
-                JSONObject r=rows.getJSONObject(i);out.put(r.optLong(idCol),r.optString("name",""));
+                JSONObject r=rows.getJSONObject(i);String value=r.optString("name", "").trim();
+                if(!value.isEmpty()&&!value.equalsIgnoreCase("null"))out.put(r.optLong(idCol),value);
             }
         }return out;
     }
@@ -614,6 +624,7 @@ public final class MainActivity extends Activity {
             m.player1=pn.getOrDefault(m.match.optLong("player1_id"),"Joueur #"+m.match.optLong("player1_id"));
             m.player2=pn.getOrDefault(m.match.optLong("player2_id"),"Joueur #"+m.match.optLong("player2_id"));
             m.tournament=cn.getOrDefault(m.match.optLong("competition_id"),"Compétition #"+m.match.optLong("competition_id"));
+            if(m.tournament==null||m.tournament.trim().isEmpty()||m.tournament.equalsIgnoreCase("null"))m.tournament="Compétition #"+m.match.optLong("competition_id");
         }return result;
     }
 
@@ -915,6 +926,7 @@ public final class MainActivity extends Activity {
         TrainingMatch m=training.get(activeId);
         bannerHost.setVisibility(m==null?View.GONE:View.VISIBLE);
         if(transportHost!=null)transportHost.setVisibility(m==null?View.GONE:View.VISIBLE);
+        refreshTransportIndicators();
         if(m==null){
             TextView label=tv("AUCUN MATCH SÉLECTIONNÉ",13,MUTED,true);label.setGravity(Gravity.CENTER);
             margin(label,bannerHost,-1,64,4,1,4,0);
@@ -979,6 +991,7 @@ public final class MainActivity extends Activity {
         photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         photo.setContentDescription("Portrait de "+(first?m.player1:m.player2));
         out.addView(photo,new LinearLayout.LayoutParams(-1,dp(58)));
+        photo.setImageBitmap(anonymousPortrait(first?BLUE:PINK));
         loadPortrait(first?m.player1:m.player2,photo);
         out.addView(name,new LinearLayout.LayoutParams(-1,0,1));
         String server=e==null?"":(e.optInt("server",0)==(first?1:2)?"  🎾":"");
@@ -988,24 +1001,39 @@ public final class MainActivity extends Activity {
         out.addView(live);
         return out;
     }
+    private Bitmap anonymousPortrait(int accent){
+        Bitmap bitmap=Bitmap.createBitmap(96,96,Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas=new android.graphics.Canvas(bitmap);
+        android.graphics.Paint paint=new android.graphics.Paint(3);
+        canvas.drawColor(0xff26313b);paint.setColor(accent);
+        paint.setAlpha(195);canvas.drawCircle(48,32,17,paint);
+        canvas.drawRoundRect(19,56,77,105,22,22,paint);
+        return bitmap;
+    }
     private void loadPortrait(String player,ImageView target){
+        if(player==null||player.trim().isEmpty())return;
         if(portraits.containsKey(player)){
             Bitmap cached=portraits.get(player);if(cached!=null)target.setImageBitmap(cached);return;
         }
+        if(!loadingPortraits.add(player))return;
         io.execute(()->{
             Bitmap bitmap=null;
             try{
-                String file=player.replace("/","_").replace("\\","_").replaceAll("\\.+$","");
-                String name=java.net.URLEncoder.encode(file.replaceAll("\\.$","" )+".png","UTF-8").replace("+","%20");
-                URL url=new URL(SupabaseApi.ENDPOINT+"/storage/v1/object/public/images/joueurs/"+name);
-                HttpURLConnection connection=(HttpURLConnection)url.openConnection();
-                connection.setConnectTimeout(5000);connection.setReadTimeout(5000);
-                try(InputStream stream=connection.getInputStream()){
-                    bitmap=BitmapFactory.decodeStream(stream);
-                }finally{connection.disconnect();}
+                String filename=player.trim().replace("/","_").replace("\\","_").replaceAll("\\.+$","")+".png";
+                String path=java.net.URLEncoder.encode(filename,"UTF-8").replace("+","%20");
+                String[] folders={"joueurs","players"};
+                for(String folder:folders){
+                    HttpURLConnection c=(HttpURLConnection)new URL(SupabaseApi.ENDPOINT+"/storage/v1/object/public/images/"+folder+"/"+path).openConnection();
+                    c.setConnectTimeout(6000);c.setReadTimeout(6000);
+                    c.setRequestProperty("apikey",SupabaseApi.PUBLISHABLE_KEY);
+                    try {if(c.getResponseCode()==200){try(InputStream stream=c.getInputStream()){bitmap=BitmapFactory.decodeStream(stream);}}}
+                    finally{c.disconnect();}
+                    if(bitmap!=null)break;
+                }
             }catch(Exception ignored){}
-            final Bitmap finalBitmap=bitmap;
-            ui(()->{portraits.put(player,finalBitmap);if(finalBitmap!=null)target.setImageBitmap(finalBitmap);});
+            final Bitmap result=bitmap;
+            ui(()->{loadingPortraits.remove(player);portraits.put(player,result);
+                if(result!=null&&training.containsKey(activeId))renderBanner();});
         });
     }
     /** V1.21 : Balle de break déterminée uniquement depuis le score observé et le serveur. */
@@ -1069,28 +1097,66 @@ public final class MainActivity extends Activity {
         int count=0;for(TrainingMatch m:training.values())if(m.checked)count++;
         playbackStatus.setText(lastPlaybackMode+"  •  "+count+" sélectionné(s)  •  Rythme "+(pcRhythm?"PC":"rapide")+" ⌄");
     }
+    private List<TrainingMatch> controlledMatches(){
+        List<TrainingMatch> matches=new ArrayList<>();
+        for(TrainingMatch match:training.values())if(match.checked)matches.add(match);
+        if(matches.isEmpty()){
+            TrainingMatch selected=training.get(activeId);
+            if(selected!=null)matches.add(selected);
+        }
+        return matches;
+    }
+    private void refreshTransportIndicators(){
+        TrainingMatch active=training.get(activeId);
+        int selectedAction=999;
+        if(active!=null){
+            switch(active.mode){
+                case "play":selectedAction=1;break;
+                case "pause":selectedAction=0;break;
+                case "stop":selectedAction=2;break;
+                case "rewind":selectedAction=-1;break;
+                case "fast_forward":selectedAction=3;break;
+            }
+        }
+        for(Map.Entry<Integer,Button> item:controlButtons.entrySet()){
+            boolean selected=item.getKey()==selectedAction;
+            Button button=item.getValue();
+            button.setBackground(bg(selected?0xff14583e:0xff172832,selected?GREEN:0xff344954,7));
+            button.setTextColor(selected?Color.WHITE:MUTED);
+            button.setElevation(selected?0:dp(3));
+            button.setSelected(selected);
+        }
+        if(speedIndicator!=null){
+            boolean fast=active!=null&&(active.mode.equals("rewind")||active.mode.equals("fast_forward"))&&active.speed>1;
+            speedIndicator.setVisibility(fast&&blinkOn?View.VISIBLE:View.GONE);
+            if(fast){speedIndicator.setText((active.mode.equals("rewind")?"◀ ":"▶ ")+active.speed+"x");
+                speedIndicator.setTextColor(active.mode.equals("rewind")?0xffff5a67:GREEN);}
+        }
+    }
     private void playback(int action){
-        boolean any=false;for(TrainingMatch m:training.values())if(m.checked)any=true;
-        if(!any){message("Coche au moins un match pour piloter la simulation.");return;}
-        String mode;int direction=0,speed=1;
+        List<TrainingMatch> targets=controlledMatches();
+        if(targets.isEmpty()){message("Sélectionne un match ou coche des rencontres.");return;}
+        int direction=0,speed=1;String mode;
         if(action==-1||action==3){
             direction=action==-1?-1:1;
-            repeatedSpeed= repeatedDirection==direction?Math.min(repeatedSpeed*2,1024):2;
+            repeatedSpeed=repeatedDirection==direction?Math.min(32,repeatedSpeed*2):2;
             repeatedDirection=direction;speed=repeatedSpeed;
             mode=direction<0?"rewind":"fast_forward";
-            lastPlaybackMode=(direction<0?"Retour rapide":"Avance rapide")+" x"+speed;
+            lastPlaybackMode=(direction<0?"Retour rapide":"Avance rapide")+" "+speed+"x";
         }else{
-            repeatedDirection=0;repeatedSpeed=1;
+            repeatedSpeed=1;repeatedDirection=0;
             mode=action==0?"pause":action==2?"stop":"play";
             lastPlaybackMode=action==0?"Pause":action==2?"Stop":"Lecture normale";
         }
-        for(TrainingMatch m:training.values())if(m.checked){
-            m.mode=mode;m.speed=speed;
-            if(mode.equals("stop")){m.step=0;m.showResult=false;}
-            if(!mode.equals("pause"))tickHistory.remove(m.id);
-            if(!mode.equals("pause")&&!mode.equals("stop"))fetchStates(m,false);
+        for(TrainingMatch match:targets){
+            match.mode=mode;match.speed=speed;
+            if(mode.equals("stop")){match.step=0;match.showResult=false;}
+            else if(match.showResult)match.showResult=false;
+            tickHistory.remove(match.id);
+            if(!mode.equals("pause")&&!mode.equals("stop"))fetchStates(match,false);
         }
-        updatePlaybackStatus();renderList();
+        blinkOn=true;
+        updatePlaybackStatus();refreshTransportIndicators();renderBanner();renderList();
     }
     private final Runnable tick=new Runnable(){@Override public void run(){
         boolean changed=false;
@@ -1112,6 +1178,7 @@ public final class MainActivity extends Activity {
             else {m.mode="pause";changed=true;}
         }
         if(changed){renderBanner();renderList();}
+        if(++blinkCycle>=3){blinkCycle=0;blinkOn=!blinkOn;refreshTransportIndicators();}
         if(!destroyed)timer.postDelayed(this,130);
     }};
     private final Map<Long,Long> tickHistory=new HashMap<>();
