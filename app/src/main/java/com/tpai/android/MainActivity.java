@@ -46,12 +46,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.31 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.32 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
- *  La lecture reproduit les etats LIVE enregistres, non le moteur PC PBP complet.
+ *  La lecture reproduit les etats LIVE enregistres; scores PBP uniquement si verifies.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V131_PC_TRAINING_CASCADE";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V132_PC_TRAINING_CASCADE";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -107,6 +107,7 @@ public final class MainActivity extends Activity {
         final double tempo;
         long dueAt = 0L;
         final ArrayList<JSONObject> states = new ArrayList<>();
+        final Map<Integer,String[]> verifiedPoints = new HashMap<>();
         boolean loaded = false, complete = false;
         TrainingMatch(JSONObject obj) { match=obj; id=obj.optLong("match_id",-1); tempo=0.88+(Math.abs(id*37L+117L)%25)/100.0; }
         JSONObject current() {
@@ -669,6 +670,7 @@ public final class MainActivity extends Activity {
         // Ces cases servent uniquement à désigner les matchs pilotés par les commandes.
         // Le téléchargement est déclenché après ajout, de manière séquentielle.
         m.mode="play";
+        io.execute(()->{loadVerifiedPointScores(m);ui(()->{if(training.containsKey(m.id)){renderBanner();renderList();}});});
         return true;
     }
     // Seuls les identifiants/favoris sont memorises dans les preferences Android.
@@ -783,48 +785,80 @@ public final class MainActivity extends Activity {
         String value=state.optString(key,"").trim();
         return value.length()==0 || value.equals("null")?"–":value;
     }
-    /** Live_states peut contenir un total de points cumulés. Convertit les deltas du jeu actif
-     *  en tennis 0/15/30/40/AV, sans traiter 127 comme un score de jeu.
-     *  Si la source est ambiguë, afficher un tiret plutôt qu'un score inventé.
-     */
+    /** Scores certifiés reconstruits exclusivement depuis point_winners et rapprochés des cumuls LIVE. */
     private String tennisPoints(TrainingMatch m,JSONObject e){
         return tennisPointForSide(m,e,true)+" - "+tennisPointForSide(m,e,false);
     }
     private String tennisPointForSide(TrainingMatch m,JSONObject e,boolean first){
         if(e==null)return "—";
-        String key=first?"points_p1":"points_p2";
-        String raw=e.optString(key,"").trim().toUpperCase(Locale.ROOT);
-        if(raw.equals("A")||raw.equals("AD")||raw.equals("40")||raw.equals("30")||raw.equals("15")||raw.equals("0"))return raw.equals("AD")?"A":raw;
-        int ix=m.states.indexOf(e);
-        if(ix<0)return "—";
-        // Les cumuls de points nécessitent la référence du DEBUT du jeu courant.
-        JSONObject cur=m.states.get(ix);
-        int cp1=cur.optInt("points_p1",-1),cp2=cur.optInt("points_p2",-1);
-        if(cp1<0||cp2<0)return "—";
-        int start=ix;
-        while(start>0){
-            JSONObject prev=m.states.get(start-1);
-            if(prev.optInt("games_p1",-1)!=cur.optInt("games_p1",-1)
-                ||prev.optInt("games_p2",-1)!=cur.optInt("games_p2",-1)
-                ||prev.optInt("sets_p1",-1)!=cur.optInt("sets_p1",-1)
-                ||prev.optInt("sets_p2",-1)!=cur.optInt("sets_p2",-1))break;
-            start--;
+        int index=m.states.indexOf(e);
+        String[] value=m.verifiedPoints.get(index);
+        return value==null?"—":value[first?0:1];
+    }
+    private static String standard(int a,int b,boolean tie){
+        if(tie)return Integer.toString(a);
+        if(a>=3&&b>=3){
+            if(a==b)return "40";
+            if(a==b+1)return "AV";
+            if(b==a+1)return "40";
+            return "—";
         }
-        int baseline=Math.max(0,start-1);
-        JSONObject base=m.states.get(baseline);
-        int a=cp1-base.optInt("points_p1",cp1),b=cp2-base.optInt("points_p2",cp2);
-        if(a<0||b<0)return "—";
-        // Sans échantillon précédent le premier état enregistré, pas de score certain.
-        if(start==0)return "—";
-        boolean tie=cur.optInt("games_p1",0)>=6 && cur.optInt("games_p2",0)>=6;
-        if(tie)return String.valueOf(first?a:b);
-        if(a<=2&&b<=2)return new String[]{"0","15","30"}[first?a:b];
-        if(a>=3&&b<=2)return first?"40":new String[]{"0","15","30"}[b];
-        if(b>=3&&a<=2)return first?new String[]{"0","15","30"}[a]:"40";
-        if(a==b)return "40";
-        if(a==b+1)return first?"A":"40";
-        if(b==a+1)return first?"40":"A";
-        return "—";
+        if(a>=4&&a-b>=2)return "JEU";
+        if(a>3)return "40";
+        return new String[]{"0","15","30","40"}[a];
+    }
+    /**
+     * Contrôles stricts: séquence de gagnants, nombre de points, jeu fini,
+     * décodage non lossy, et correspondance UNIQUE des cumuls avec live_states.
+     * Aucun score n'est extrapolé lorsqu'il manque des données.
+     */
+    private static void loadVerifiedPointScores(TrainingMatch m){
+        try{
+            JSONArray games=SupabaseApi.list("p2p_games",SupabaseApi.args(
+                "select","set_no,game_no,point_winners,points_count,is_tiebreak,decode_mode,confidence,lossy",
+                "match_id","eq."+m.id,"order","set_no.asc,game_no.asc","limit","1000"));
+            HashMap<String,String[]> reconstructed=new HashMap<>();
+            HashSet<String> ambiguous=new HashSet<>();
+            int total1=0,total2=0;
+            for(int i=0;i<games.length();i++){
+                JSONObject game=games.getJSONObject(i);
+                String sequence=game.optString("point_winners","");
+                if(sequence.isEmpty()||!sequence.matches("[12]+")||sequence.length()!=game.optInt("points_count",-1)
+                  ||game.optInt("lossy",1)!=0)return;
+                String mode=game.optString("decode_mode","").toLowerCase(Locale.ROOT);
+                String conf=game.optString("confidence","").toLowerCase(Locale.ROOT);
+                if(mode.contains("unknown")||conf.contains("low")||conf.contains("unknown"))return;
+                boolean tie=game.optInt("is_tiebreak",0)!=0;
+                int a=0,b=0;
+                int threshold=7;
+                // Les super tie-breaks en 10 points ne doivent pas être assimilés aux tie-breaks à 7.
+                if(tie && sequence.length()>0){
+                    int f1=0,f2=0;for(char c:sequence.toCharArray()){if(c=='1')f1++;else f2++;}
+                    if(Math.max(f1,f2)>=10)threshold=10;
+                }
+                for(int point=0;point<sequence.length();point++){
+                    if(sequence.charAt(point)=='1'){a++;total1++;}else{b++;total2++;}
+                    boolean finished=tie?(Math.max(a,b)>=threshold&&Math.abs(a-b)>=2):
+                        (Math.max(a,b)>=4&&Math.abs(a-b)>=2);
+                    if(finished && point!=sequence.length()-1)return;
+                    String left=finished?"JEU":standard(a,b,tie);
+                    String right=finished?"JEU":standard(b,a,tie);
+                    if(finished){if(a>b)right=standard(b,a,tie);else left=standard(a,b,tie);}
+                    String key=total1+":"+total2;
+                    if(reconstructed.containsKey(key))ambiguous.add(key);
+                    else reconstructed.put(key,new String[]{left,right});
+                }
+            }
+            HashMap<Integer,String[]> verified=new HashMap<>();
+            for(int i=0;i<m.states.size();i++){
+                JSONObject e=m.states.get(i);
+                String a=e.optString("points_p1",""),b=e.optString("points_p2","");
+                if(!a.matches("[0-9]+")||!b.matches("[0-9]+"))continue;
+                String key=a+":"+b;
+                if(!ambiguous.contains(key)&&reconstructed.containsKey(key))verified.put(i,reconstructed.get(key));
+            }
+            synchronized(m.verifiedPoints){m.verifiedPoints.clear();m.verifiedPoints.putAll(verified);}
+        }catch(Exception ignored){/* Colonne absente / format incompatible : pas de score inventé. */}
     }
     private void renderList(){
         if(listHost==null)return;
@@ -968,11 +1002,18 @@ public final class MainActivity extends Activity {
     }
     private String setCell(TrainingMatch m,JSONObject state,boolean first,int set){
         if(state==null)return "–";
-        // Les observations exposent le nombre de sets et les jeux du set courant,
-        // mais pas nécessairement les cinq scores historiques. Ne rien inventer.
-        int won=state.optInt(first?"sets_p1":"sets_p2",0);
-        int total=state.optInt("sets_p1",0)+state.optInt("sets_p2",0);
-        if(set==total+1)return gridNum(state,first?"games_p1":"games_p2");
+        int currentSet=state.optInt("sets_p1",0)+state.optInt("sets_p2",0)+1;
+        if(set==currentSet)return gridNum(state,first?"games_p1":"games_p2");
+        if(set>currentSet)return "–";
+        int at=m.states.indexOf(state);
+        if(at<1)return "–";
+        // Dernier état effectivement observé du set antérieur avant son changement.
+        for(int i=at-1;i>=0;i--){
+            JSONObject previous=m.states.get(i), next=m.states.get(i+1);
+            int before=previous.optInt("sets_p1",0)+previous.optInt("sets_p2",0)+1;
+            int after=next.optInt("sets_p1",0)+next.optInt("sets_p2",0)+1;
+            if(before==set && after>set)return gridNum(previous,first?"games_p1":"games_p2");
+        }
         return "–";
     }
     private LinearLayout compactPlayer(TrainingMatch m,boolean first,JSONObject e){
@@ -1013,6 +1054,7 @@ public final class MainActivity extends Activity {
         delete.setContentDescription("Supprimer "+m.player1+" contre "+m.player2);
         FrameLayout.LayoutParams trashParams=new FrameLayout.LayoutParams(dp(65),-1,Gravity.LEFT);
         frame.addView(delete,trashParams);
+        delete.setVisibility(revealedMatchId==m.id?View.VISIBLE:View.GONE);
         delete.setOnClickListener(v->{
             training.remove(m.id);tickHistory.remove(m.id);
             if(activeId==m.id)activeId=training.isEmpty()?-1:training.values().iterator().next().id;
@@ -1021,6 +1063,7 @@ public final class MainActivity extends Activity {
         // Un fond opaque sur toute la largeur du match cache le bouton rouge en position 0.
         line.setBackgroundColor(m.id==activeId?0xff18392e:0xff0d1b27);
         frame.addView(line,new FrameLayout.LayoutParams(-1,-1));
+        frame.setClipChildren(true);
         final int width=dp(65);
         line.setTranslationX(revealedMatchId==m.id?width:0);
         final float[] down={0,0};
@@ -1035,8 +1078,10 @@ public final class MainActivity extends Activity {
                     float dx=event.getRawX()-down[0],dy=event.getRawY()-down[1];
                     if(!swiped[0]&&Math.abs(dx)>dp(9)&&Math.abs(dx)>Math.abs(dy))swiped[0]=true;
                     if(swiped[0]){
+                        delete.setVisibility(View.VISIBLE);
                         listScroll.requestDisallowInterceptTouchEvent(true);
                         line.setTranslationX(Math.max(0,Math.min(width,initial[0]+dx)));
+                        if(line.getTranslationX()<1)delete.setVisibility(View.GONE);
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
@@ -1126,7 +1171,7 @@ public final class MainActivity extends Activity {
     private void showGameDetails(TrainingMatch match){
         work("Lecture distante du détail des jeux…",()->{
             JSONArray games=SupabaseApi.list("p2p_games",SupabaseApi.args(
-                "select","id,set_no,game_no,is_tiebreak,server,winner,points_count,decode_mode,confidence,lossy",
+                "select","id,set_no,game_no,is_tiebreak,server,winner,points_count,point_winners,decode_mode,confidence,lossy",
                 "match_id","eq."+match.id,"order","set_no.asc,game_no.asc,id.asc","limit","150"));
             ui(()->displayGameDetails(match,games));
         });
@@ -1145,13 +1190,13 @@ public final class MainActivity extends Activity {
                 margin(title,content,-1,32,1,8,1,3);
             }
             StringBuilder b=new StringBuilder("Jeu ").append(game);
-            if(g.optBoolean("is_tiebreak",false))b.append("  •  TIE-BREAK");
+            if(g.optInt("is_tiebreak",0)!=0)b.append("  •  TIE-BREAK");
             b.append("\nServeur : ").append(g.optString("server","—"));
             b.append("   •   Vainqueur : ").append(g.optString("winner","—"));
             b.append("\nPoints enregistrés : ").append(g.optInt("points_count",0));
             String mode=g.optString("decode_mode","");
             if(!mode.isEmpty())b.append("   •   Décodage : ").append(mode);
-            if(g.optBoolean("lossy",false))b.append("\n⚠ Décodage potentiellement incomplet");
+            if(g.optInt("lossy",0)!=0)b.append("\n⚠ Décodage potentiellement incomplet");
             TextView item=tv(b.toString(),12,Color.WHITE,false);
             item.setPadding(dp(9),dp(6),dp(9),dp(6));
             item.setBackground(bg(0xff20262c,0xff344954,6));
@@ -1161,7 +1206,7 @@ public final class MainActivity extends Activity {
             TextView no=tv("Aucun jeu décodé n'est disponible pour cette rencontre.",13,MUTED,false);
             margin(no,content,-1,-2,0,12,0,15);
         }
-        TextView footer=tv("Jeux issus de tpai.p2p_games : "+games.length()+". Les points individuels ne sont pas exposés par l'API publique actuelle.",11,MUTED,false);
+        TextView footer=tv("Jeux issus de tpai.p2p_games : "+games.length()+". Les points sont reconstruits depuis point_winners si le jeu est cohérent et relié à l’état LIVE.",11,MUTED,false);
         margin(footer,content,-1,-2,0,12,0,10);
         sc.addView(content);
         new AlertDialog.Builder(this).setTitle(match.player1+" — "+match.player2)
