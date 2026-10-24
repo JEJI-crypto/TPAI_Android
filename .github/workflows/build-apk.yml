@@ -40,7 +40,7 @@ jobs:
           set -euo pipefail
           grep -Fq 'TPAI_BUILD_V126_PC_GRID_NATURAL_CLOCKS' app/src/main/java/com/tpai/android/MainActivity.java
           grep -Fq 'versionCode 26' app/build.gradle
-          grep -Fq "versionName '1.0.24'" app/build.gradle
+          grep -Fq "versionName '1.0.26'" app/build.gradle
           grep -Fq '"Accept-Profile", "tpai"' app/src/main/java/com/tpai/android/SupabaseApi.java
           grep -Fq 'MATCHS D’ENTRAÎNEMENT' app/src/main/java/com/tpai/android/MainActivity.java
           grep -Fq 'MAX_TRAINING = 10' app/src/main/java/com/tpai/android/MainActivity.java
