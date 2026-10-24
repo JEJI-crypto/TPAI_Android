@@ -44,12 +44,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.27 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.28 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres, non le moteur PC PBP complet.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V127_PC_TRAINING_CASCADE";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V128_PC_TRAINING_CASCADE";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -767,7 +767,7 @@ public final class MainActivity extends Activity {
         // * signale sans ambiguïté une cote estimée par Booker, jamais par Android.
         return odds(state,key)+(state.optBoolean("is_estimated",false)?"*":"");
     }
-    // V1.27 : lignes de scores compactes inspirees du tableau du client PC V845.
+    // V1.28 : lignes de scores compactes inspirees du tableau du client PC V845.
     // Les colonnes AVM, LIVE, sets, jeux et points sont alignees entre J1 et J2.
     private TextView gridCell(String value, int size, int color, boolean bold, int gravity) {
         TextView t=tv(value,size,color,bold);

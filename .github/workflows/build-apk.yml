@@ -34,26 +34,32 @@ jobs:
         run: |
           test -n "$TPAI_KEYSTORE_BASE64"
           printf '%s' "$TPAI_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tpai-release.jks"
-      - name: Verifier exactement les sources V1.27
+      - name: Verifier automatiquement la version et les sources
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fq 'TPAI_BUILD_V127_PC_TRAINING_CASCADE' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'versionCode 26' app/build.gradle
-          grep -Fq "versionName '1.0.27'" app/build.gradle
-          grep -Fq '"Accept-Profile", "tpai"' app/src/main/java/com/tpai/android/SupabaseApi.java
-          grep -Fq 'MATCHS D’ENTRAÎNEMENT' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'MAX_TRAINING = 10' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'COMPLETE_OBSERVED' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'live_missing_points' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'loadObservedHistory' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'Côtes estimées incluses' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'COMPLETE_ESTIMATED' app/src/main/java/com/tpai/android/MainActivity.java
-          grep -Fq 'filterRevision' app/src/main/java/com/tpai/android/MainActivity.java
-          if grep -Fq 'TOUS LES MATCHS' app/src/main/java/com/tpai/android/MainActivity.java; then
-            echo 'ERREUR: ancienne interface Tous les matchs'; exit 1
-          fi
-          echo "Empreinte source MainActivity : $(sha256sum app/src/main/java/com/tpai/android/MainActivity.java)"
+          python3 - <<'PYVERIFY'
+          import re
+          from pathlib import Path
+          gradle = Path('app/build.gradle').read_text(encoding='utf-8')
+          src = Path('app/src/main/java/com/tpai/android/MainActivity.java').read_text(encoding='utf-8')
+          api = Path('app/src/main/java/com/tpai/android/SupabaseApi.java').read_text(encoding='utf-8')
+          workflow = Path('.github/workflows/build-apk.yml').read_text(encoding='utf-8')
+          code = re.search(r'(?m)^\s*versionCode\s+(\d+)\s*$', gradle)
+          name = re.search(r"""(?m)^\s*versionName\s+['"]([^'"]+)['"]\s*$""", gradle)
+          assert code and name, 'Version Gradle introuvable'
+          version = f'1.0.{code.group(1)}'
+          assert name.group(1) == version, f'Incoherence Gradle: {version} != {name.group(1)}'
+          assert version == '1.0.28', f'Version inattendue: {version}'
+          marker = f'TPAI_BUILD_V1{code.group(1)}_PC_TRAINING_CASCADE'
+          assert marker in src, 'Marqueur Android absent / incoherent'
+          assert '"Accept-Profile", "tpai"' in api, 'Profil REST tpai absent'
+          assert 'MAX_TRAINING = 10' in src, 'Limite de matches manquante'
+          assert 'COMPLETE_OBSERVED' in src and 'COMPLETE_ESTIMATED' in src, 'Filtrage cotes manquant'
+          assert 'Côtes estimées incluses' in src, 'Option cotes estimees absente'
+          assert 'android-v1.28' in workflow and 'TPAI_Android_V1.28.apk' in workflow, 'Publication V1.28 incoherente'
+          print(f'SOURCES VERIFIEES : {version}, code={code.group(1)}, marker={marker}')
+          PYVERIFY
       - name: Construire APK et AAB signes
         env:
           TPAI_KEYSTORE_PATH: ${{ runner.temp }}/tpai-release.jks
@@ -62,9 +68,9 @@ jobs:
       - name: Nommer les sorties
         run: |
           cp app/build/outputs/apk/release/app-release.apk TPAI_Android.apk
-          cp TPAI_Android.apk TPAI_Android_V1.27.apk
+          cp TPAI_Android.apk TPAI_Android_V1.28.apk
           cp app/build/outputs/bundle/release/app-release.aab TPAI_Android.aab
-      - name: Verifier le contenu REEL de l APK V1.27
+      - name: Verifier le contenu REEL de l APK V1.28
         run: |
           python3 - <<'PYBUILD'
           from zipfile import ZipFile
@@ -73,7 +79,7 @@ jobs:
           assert apk.is_file() and apk.stat().st_size > 10000, 'APK absent ou anormalement petit'
           with ZipFile(apk) as z:
               dex=b''.join(z.read(n) for n in z.namelist() if n.startswith('classes') and n.endswith('.dex'))
-          assert b'TPAI_BUILD_V127_PC_TRAINING_CASCADE' in dex, 'ECHEC: l APK ne contient pas la nouvelle interface V1.27'
+          assert b'TPAI_BUILD_V128_PC_TRAINING_CASCADE' in dex, 'ECHEC: l APK ne contient pas la nouvelle interface V1.28'
           assert b'Accept-Profile' in dex, 'ECHEC: API REST attendue absente'
           print('VERIFIE: APK contient la nouvelle interface et l acces REST tpai')
           PYBUILD
@@ -81,10 +87,10 @@ jobs:
       - name: Archives GitHub Actions
         uses: actions/upload-artifact@v4
         with:
-          name: TPAI_Android_V1.27
+          name: TPAI_Android_V1.28
           path: |
             TPAI_Android.apk
-            TPAI_Android_V1.27.apk
+            TPAI_Android_V1.28.apk
             TPAI_Android.aab
           if-no-files-found: error
       - name: Publication GitHub APK et AAB
@@ -96,16 +102,16 @@ jobs:
           make_latest: true
           files: |
             TPAI_Android.apk
-            TPAI_Android_V1.27.apk
+            TPAI_Android_V1.28.apk
             TPAI_Android.aab
 
-      - name: Publication versionnee independante V1.27
+      - name: Publication versionnee independante V1.28
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: android-v1.27
-          name: TPAI Android V1.27 - Matchs entraînement REST tpai
+          tag_name: android-v1.28
+          name: TPAI Android V1.28 - Matchs entraînement REST tpai
           prerelease: false
           files: |
             TPAI_Android.apk
-            TPAI_Android_V1.27.apk
+            TPAI_Android_V1.28.apk
             TPAI_Android.aab

@@ -1,4 +1,4 @@
-# TPAI Android V1.27 — Interface minimaliste
+# TPAI Android V1.28 — Interface minimaliste
 
 - Menu ☰ et filtre « Côtes estimées incluses », décoché au lancement.
 - Recherche ⌕ et ajout ＋ dans la barre supérieure.
@@ -11,3 +11,5 @@
 **Limites** : la durée de tirage dépend de la disponibilité des matchs complets et du serveur ; le projet ne contient aucun accès direct à PostgreSQL et n'a pas été testé sur le téléphone.
 
 Après téléchargement du ZIP dans Download, exécuter `tpai` depuis Termux.
+
+V1.28 : workflow controle versionCode/versionName dynamiquement (sans numero precedent code en dur).
