@@ -12,6 +12,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.widget.FrameLayout;
 import android.view.View;
 import android.view.WindowInsets;
 import android.widget.Button;
@@ -44,12 +46,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.29 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.30 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres, non le moteur PC PBP complet.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V129_PC_TRAINING_CASCADE";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V130_PC_TRAINING_CASCADE";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -67,9 +69,9 @@ public final class MainActivity extends Activity {
     private long generation = 0;
     private boolean inProgress = false;
     private LinearLayout listHost, bannerHost, filterHost, root, transportHost;
+    private long revealedMatchId=-1;
     private ScrollView listScroll;
     private TextView status, counter, playbackStatus;
-    private CheckBox selectAll;
     private EditText playerSearch;
     private Button randomButton;
     private String selectedCategory = "", selectedTournament = "", selectedSeason = "";
@@ -199,32 +201,15 @@ public final class MainActivity extends Activity {
         margin(topbar,root,-1,47,0,0,0,4);
         subtitleView=tv("MATCHS D’ENTRAÎNEMENT",12,GREEN,true);
         margin(subtitleView,root,-1,25,4,0,0,2);
-        // Le bandeau ET les commandes restent invisibles sans sélection explicite.
-        bannerHost=col();bannerHost.setBackground(bg(0xff10151b,0xff26363d,8));
+        // Seul le bandeau historique et son curseur restent visibles pour le match choisi.
+        bannerHost=col();bannerHost.setBackground(bg(0xff080808,0xff26363d,3));
         margin(bannerHost,root,-1,-2,0,0,0,2);
-        transportHost=col();
-        LinearLayout buttons=row();
-        transportButton(buttons,"⏪",-1);transportButton(buttons,"⏸",0);
-        transportButton(buttons,"▶",1);transportButton(buttons,"⏹",2);transportButton(buttons,"⏩",3);
-        margin(buttons,transportHost,-1,44,0,0,0,0);
-        speedIndicator=tv("",12,GREEN,true);speedIndicator.setGravity(Gravity.CENTER);
-        margin(speedIndicator,transportHost,-1,22,0,0,0,0);
-        speedIndicator.setVisibility(View.GONE);
-        playbackStatus=tv("Lecture des matchs cochés · appuyer pour changer le rythme",10,MUTED,false);
-        playbackStatus.setGravity(Gravity.CENTER);
-        margin(playbackStatus,transportHost,-1,29,0,0,0,0);
-        playbackStatus.setOnClickListener(v->showRhythmDialog());
-        margin(transportHost,root,-1,-2,0,0,0,4);
         // Conservés hors écran : les filtres s'ouvrent désormais exclusivement par l'icône +.
         filterHost=row();
         playerSearch=new EditText(this);playerSearch.setSingleLine(true);
         playerSearch.setText(" ");
         randomButton=button("ALÉATOIRE",0xff123b52);randomButton.setOnClickListener(v->addRandom());
         LinearLayout listBar=row();listBar.setPadding(dp(3),0,dp(2),0);
-        selectAll=new CheckBox(this);selectAll.setText("Tous");selectAll.setTextColor(Color.WHITE);
-        selectAll.setTextSize(12);selectAll.setButtonTintList(ColorStateList.valueOf(GREEN));
-        selectAll.setOnClickListener(v->{for(TrainingMatch m:training.values())m.checked=selectAll.isChecked();saveSelection();renderList();});
-        margin(selectAll,listBar,94,42,0,0,1,0);
         counter=tv("0 / 10 matchs",12,Color.WHITE,true);
         listBar.addView(counter,new LinearLayout.LayoutParams(0,dp(42),1));
         Button actions=button("⋮",0xff19232b);actions.setTextSize(23);
@@ -336,8 +321,8 @@ public final class MainActivity extends Activity {
     }
     private void showListMenu(){
         new AlertDialog.Builder(this).setTitle("Liste d'entraînement")
-            .setItems(new String[]{"Supprimer les matchs cochés", "Vider la liste (favoris protégés)", "Désélectionner le bandeau", "Rythme de lecture"},(d,n)->{
-                if(n==0)deleteChecked();else if(n==1)clearTraining();else if(n==2){activeId=-1;saveSelection();renderBanner();renderList();}
+            .setItems(new String[]{"Vider la liste (favoris protégés)", "Masquer le bandeau", "Rythme de lecture"},(d,n)->{
+                if(n==0)clearTraining();else if(n==1){activeId=-1;saveSelection();renderBanner();renderList();}
                 else showRhythmDialog();
             }).show();
     }
@@ -725,7 +710,7 @@ public final class MainActivity extends Activity {
                 for(TrainingMatch m:restored){
                     JSONObject state=states.get(m.id);if(state==null)continue;
                     m.favorite=state.optBoolean("favorite",false);
-                    m.checked=state.optBoolean("checked",true);
+                    m.checked=false;
                     addMatch(m);
                 }
                 activeId=-1; // À chaque ouverture, aucune sélection implicite.
@@ -874,10 +859,6 @@ public final class MainActivity extends Activity {
             star.setGravity(Gravity.CENTER);star.setContentDescription("Favori");
             star.setOnClickListener(v->{m.favorite=!m.favorite;saveSelection();renderList();});
             leading.addView(star,new LinearLayout.LayoutParams(dp(25),dp(28)));
-            CheckBox check=new CheckBox(this);check.setButtonTintList(ColorStateList.valueOf(GREEN));check.setChecked(m.checked);
-            check.setPadding(0,0,0,0);check.setMinWidth(0);check.setMinimumWidth(0);
-            check.setOnCheckedChangeListener((v,checked)->{m.checked=checked;saveSelection();updatePlaybackStatus();});
-            leading.addView(check,new LinearLayout.LayoutParams(dp(29),dp(28)));
             line.addView(leading,new LinearLayout.LayoutParams(dp(31),dp(57)));
             LinearLayout table=col();
             // En-tetes et valeurs partagent les memes tailles de colonnes.
@@ -908,79 +889,152 @@ public final class MainActivity extends Activity {
             }
             line.addView(table,new LinearLayout.LayoutParams(0,dp(60),1));
             line.setOnClickListener(v->{activeId=m.id;saveSelection();renderBanner();renderList();fetchStates(m,false);});
-            margin(line,listHost,-1,65,0,1,0,0);
+            attachSwipeRow(m,line);
             View separator=new View(this);separator.setBackgroundColor(0xff25333f);
             listHost.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));
-        }
-        if(selectAll!=null){
-            boolean everyone=!training.isEmpty();
-            for(TrainingMatch m:training.values())if(!m.checked){everyone=false;break;}
-            selectAll.setChecked(everyone);
         }
         updatePlaybackStatus();
         if(listScroll!=null)listScroll.post(()->listScroll.scrollTo(0,originalScroll));
     }
+    /** Bandeau de score PC condensé pour la largeur réelle du téléphone. */
     private void renderBanner(){
         if(bannerHost==null)return;
         bannerHost.removeAllViews();
         TrainingMatch m=training.get(activeId);
         bannerHost.setVisibility(m==null?View.GONE:View.VISIBLE);
-        if(transportHost!=null)transportHost.setVisibility(m==null?View.GONE:View.VISIBLE);
-        refreshTransportIndicators();
-        if(m==null){
-            TextView label=tv("AUCUN MATCH SÉLECTIONNÉ",13,MUTED,true);label.setGravity(Gravity.CENTER);
-            margin(label,bannerHost,-1,64,4,1,4,0);
-            return;
-        }
-        String date=m.match.optString("match_date","")+"  "+m.match.optString("match_time","");
-        TextView comp=tv(m.tournament+"  •  "+date,10,MUTED,false);comp.setGravity(Gravity.CENTER);
-        margin(comp,bannerHost,-1,23,4,3,4,1);
+        if(m==null)return;
         JSONObject e=m.showResult?m.finalState():m.current();
-        LinearLayout h=row();h.setPadding(dp(4),0,dp(4),0);
-        LinearLayout a=playerBanner(m,true,e);LinearLayout b=playerBanner(m,false,e);
-        h.addView(a,new LinearLayout.LayoutParams(0,dp(98),1));
-        LinearLayout center=col();center.setGravity(Gravity.CENTER);
-        TextView sets=tv(score(e,"sets_p1","sets_p2"),22,0xffe8e8e8,true);sets.setGravity(Gravity.CENTER);
-        center.addView(sets);
-        TextView games=tv("JEUX "+score(e,"games_p1","games_p2"),11,0xffbcd0d1,false);games.setGravity(Gravity.CENTER);
-        center.addView(games);
-        TextView points=tv(tennisPoints(m,e),17,0xffffd400,true);points.setGravity(Gravity.CENTER);
-        center.addView(points);
-        h.addView(center,new LinearLayout.LayoutParams(dp(104),dp(98)));
-        h.addView(b,new LinearLayout.LayoutParams(0,dp(98),1));
-        bannerHost.addView(h);
-        if(e!=null && isBreakPoint(e)){
-            TextView breakFlag=tv("BREAK  •  Balle de break",12,0xffff697d,true);
-            breakFlag.setGravity(Gravity.CENTER);
-            margin(breakFlag,bannerHost,-1,22,0,0,0,0);
+        LinearLayout alerts=row();alerts.setBackgroundColor(0xff494949);
+        TextView left=tv("S  ST",9,Color.BLACK,true);left.setPadding(dp(4),0,dp(4),0);
+        alerts.addView(left);
+        TextView msg=tv("Aucune alerte",10,Color.WHITE,true);msg.setGravity(Gravity.CENTER);
+        alerts.addView(msg,new LinearLayout.LayoutParams(0,dp(20),1));
+        margin(alerts,bannerHost,-1,20,0,0,0,2);
+        String tournament=m.tournament==null||m.tournament.trim().isEmpty()||m.tournament.equalsIgnoreCase("null")?"Tournoi non renseigné":m.tournament;
+        String date=m.match.optString("match_date","");
+        String time=m.match.optString("match_time","");
+        TextView comp=tv("◉  "+tournament+"  |  "+date+(time.isEmpty()?"":" "+time),9,MUTED,false);
+        comp.setGravity(Gravity.CENTER);comp.setSingleLine(true);comp.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        margin(comp,bannerHost,-1,22,4,0,4,0);
+        LinearLayout upper=row();upper.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout p1=compactPlayer(m,true,e),p2=compactPlayer(m,false,e);
+        upper.addView(p1,new LinearLayout.LayoutParams(0,dp(112),1));
+        LinearLayout middle=col();middle.setGravity(Gravity.CENTER);
+        TextView ball=tv("🎾",17,0xffffeb51,true);ball.setGravity(Gravity.CENTER);
+        if(e!=null){String serve=e.optString("server","");if(serve.equals("1")||serve.equalsIgnoreCase("J1"))ball.setText("🎾 ◀");else if(serve.equals("2")||serve.equalsIgnoreCase("J2"))ball.setText("▶ 🎾");}
+        middle.addView(ball);
+        TextView points=tv(tennisPoints(m,e).replace(" - "," : "),23,0xffc7f000,true);
+        points.setGravity(Gravity.CENTER);middle.addView(points);
+        upper.addView(middle,new LinearLayout.LayoutParams(dp(108),dp(104)));
+        upper.addView(p2,new LinearLayout.LayoutParams(0,dp(112),1));
+        bannerHost.addView(upper);
+        LinearLayout scoreBoard=col();
+        LinearLayout top=row();
+        addWeightedCell(top,"",9,Color.WHITE,1.3f);
+        for(int i=1;i<=5;i++)addWeightedCell(top,"SET "+i,9,Color.WHITE,1f);
+        scoreBoard.addView(top);
+        for(int side=0;side<2;side++){
+            LinearLayout r=row();r.setBackgroundColor(0xff686868);
+            String name=side==0?m.player1:m.player2;
+            addWeightedCell(r,name,10,Color.WHITE,1.3f);
+            for(int set=1;set<=5;set++){
+                String score=setCell(m,e,side==0,set);
+                addWeightedCell(r,score,11,set==Math.max(1,Math.min(5,(e==null?0:e.optInt("sets_p1")+e.optInt("sets_p2"))+1))?0xffd2ef53:Color.WHITE,1f);
+            }
+            scoreBoard.addView(r,new LinearLayout.LayoutParams(-1,dp(25)));
         }
-        // Curseur manuel : index réel des observations, sans reconstituer des points fictifs.
-        if(m.loaded && m.states.size()>1 && !m.showResult){
+        margin(scoreBoard,bannerHost,-1,-2,dp(2),dp(2),dp(2),dp(3));
+        if(m.loaded&&m.states.size()>1&&!m.showResult){
             SeekBar seek=new SeekBar(this);
             seek.setMax(m.states.size()-1);seek.setProgress(Math.min(m.step,m.states.size()-1));
-            seek.setProgressTintList(ColorStateList.valueOf(GREEN));
-            seek.setThumbTintList(ColorStateList.valueOf(GREEN));
+            seek.setProgressTintList(ColorStateList.valueOf(GREEN));seek.setThumbTintList(ColorStateList.valueOf(GREEN));
             seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
                 private int desired=m.step;
-                @Override public void onStartTrackingTouch(SeekBar b) { desired=b.getProgress(); }
-                @Override public void onProgressChanged(SeekBar b,int progress,boolean fromUser){
-                    if(fromUser)desired=progress;
-                }
+                @Override public void onStartTrackingTouch(SeekBar b){desired=b.getProgress();}
+                @Override public void onProgressChanged(SeekBar b,int progress,boolean fromUser){if(fromUser)desired=progress;}
                 @Override public void onStopTrackingTouch(SeekBar b){
                     if(!training.containsKey(m.id))return;
                     m.step=Math.min(Math.max(0,desired),m.states.size()-1);
-                    m.mode="pause";
-                    tickHistory.remove(m.id);
+                    m.showResult=false;m.mode="play";m.speed=1;tickHistory.remove(m.id);
                     renderBanner();renderList();
                 }
             });
-            margin(seek,bannerHost,-1,29,5,0,5,0);
+            margin(seek,bannerHost,-1,34,2,4,2,4);
         }
-        TextView bottom=tv(e==null?"En attente de la chronologie LIVE…":
-            (m.showResult?lastStateLabel(m).toUpperCase(Locale.ROOT):
-            "SET "+(e.optInt("sets_p1")+e.optInt("sets_p2")+1)+"  •  ÉTAT "+(m.step+1)+" / "+m.states.size()+
-            "  •  "+(e.optBoolean("is_estimated",false)?"* COTES BOOKER ESTIMÉES":"COTES BOOKER OBSERVÉES")),10,GREEN,false);
-        bottom.setGravity(Gravity.CENTER);margin(bottom,bannerHost,-1,28,4,0,4,2);
+    }
+    private void addWeightedCell(LinearLayout row,String value,int textSize,int color,float weight){
+        TextView t=tv(value,textSize,color,false);t.setGravity(Gravity.CENTER);
+        t.setSingleLine(true);t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        row.addView(t,new LinearLayout.LayoutParams(0,dp(23),weight));
+    }
+    private String setCell(TrainingMatch m,JSONObject state,boolean first,int set){
+        if(state==null)return "–";
+        // Les observations exposent le nombre de sets et les jeux du set courant,
+        // mais pas nécessairement les cinq scores historiques. Ne rien inventer.
+        int won=state.optInt(first?"sets_p1":"sets_p2",0);
+        int total=state.optInt("sets_p1",0)+state.optInt("sets_p2",0);
+        if(set==total+1)return gridNum(state,first?"games_p1":"games_p2");
+        return "–";
+    }
+    private LinearLayout compactPlayer(TrainingMatch m,boolean first,JSONObject e){
+        LinearLayout player=col();player.setGravity(Gravity.CENTER);
+        String name=first?m.player1:m.player2;
+        TextView label=tv(name,10,first?PINK:BLUE,true);label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        player.addView(label,new LinearLayout.LayoutParams(-1,dp(24)));
+        LinearLayout details=row();details.setGravity(Gravity.CENTER);
+        ImageView portrait=new ImageView(this);portrait.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        portrait.setImageBitmap(anonymousPortrait(first?PINK:BLUE));
+        portrait.setContentDescription("Portrait de "+name);
+        loadPortrait(name,portrait);
+        details.addView(portrait,new LinearLayout.LayoutParams(0,dp(69),1));
+        LinearLayout numbers=col();numbers.setGravity(Gravity.CENTER);
+        TextView avm=tv(odds(m.match,first?"avm_odd1":"avm_odd2"),10,Color.WHITE,false);
+        TextView live=tv(currentOdds(m,first),12,0xffd6eb4d,true);
+        avm.setGravity(Gravity.CENTER);live.setGravity(Gravity.CENTER);
+        numbers.addView(avm);numbers.addView(live);
+        TextView sets=tv(gridNum(e,first?"sets_p1":"sets_p2"),25,Color.WHITE,true);
+        sets.setGravity(Gravity.CENTER);numbers.addView(sets);
+        details.addView(numbers,new LinearLayout.LayoutParams(dp(49),dp(75)));
+        player.addView(details,new LinearLayout.LayoutParams(-1,dp(79)));
+        return player;
+    }
+    private void attachSwipeRow(TrainingMatch m,LinearLayout line){
+        FrameLayout frame=new FrameLayout(this);
+        Button delete=button("🗑",0xffb12f39);delete.setContentDescription("Supprimer "+m.player1+" contre "+m.player2);
+        FrameLayout.LayoutParams trashParams=new FrameLayout.LayoutParams(dp(70),dp(65),Gravity.LEFT|Gravity.TOP);
+        frame.addView(delete,trashParams);
+        delete.setOnClickListener(v->{
+            training.remove(m.id);tickHistory.remove(m.id);
+            if(activeId==m.id)activeId=training.isEmpty()?-1:training.values().iterator().next().id;
+            revealedMatchId=-1;saveSelection();renderBanner();renderList();
+        });
+        frame.addView(line,new FrameLayout.LayoutParams(-1,dp(65)));
+        if(revealedMatchId==m.id)line.setTranslationX(dp(70));
+        final float[] down={0,0};final boolean[] swiped={false};
+        line.setOnTouchListener((v,event)->{
+            switch(event.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    down[0]=event.getX();down[1]=event.getY();swiped[0]=false;return true;
+                case MotionEvent.ACTION_MOVE:
+                    float delta=event.getX()-down[0];
+                    if(Math.abs(delta)>dp(10)&&Math.abs(delta)>Math.abs(event.getY()-down[1]))swiped[0]=true;
+                    if(swiped[0]){listScroll.requestDisallowInterceptTouchEvent(true);line.setTranslationX(Math.min(dp(70),Math.max(0,(revealedMatchId==m.id?dp(70):0)+delta)));return true;}
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    listScroll.requestDisallowInterceptTouchEvent(false);
+                    if(swiped[0]){
+                        boolean open=line.getTranslationX()>dp(35);
+                        revealedMatchId=open?m.id:-1;renderList();return true;
+                    }
+                    if(revealedMatchId==m.id){revealedMatchId=-1;renderList();}
+                    else {activeId=m.id;saveSelection();renderBanner();renderList();fetchStates(m,false);}
+                    return true;
+                case MotionEvent.ACTION_CANCEL:listScroll.requestDisallowInterceptTouchEvent(false);line.setTranslationX(revealedMatchId==m.id?dp(70):0);return true;
+            }
+            return true;
+        });
+        margin(frame,listHost,-1,65,0,1,0,0);
     }
     private LinearLayout playerBanner(TrainingMatch m,boolean first,JSONObject e){
         LinearLayout out=col();out.setPadding(dp(3),dp(7),dp(3),dp(4));
@@ -1099,7 +1153,7 @@ public final class MainActivity extends Activity {
     }
     private List<TrainingMatch> controlledMatches(){
         List<TrainingMatch> matches=new ArrayList<>();
-        for(TrainingMatch match:training.values())if(match.checked)matches.add(match);
+        
         if(matches.isEmpty()){
             TrainingMatch selected=training.get(activeId);
             if(selected!=null)matches.add(selected);
