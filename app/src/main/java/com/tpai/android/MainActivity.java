@@ -37,12 +37,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.25 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.26 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres, non le moteur PC PBP complet.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V125_COMPACT_PC_LIST";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V126_PC_GRID_NATURAL_CLOCKS";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -69,7 +69,7 @@ public final class MainActivity extends Activity {
     private long activeId = -1;
     private int randomCount = 4;
     private String lastPlaybackMode = "Lecture normale";
-    private boolean pcRhythm = false; // démarrage rapide; bascule volontaire vers le rythme proche du PC
+    private boolean pcRhythm = true; // rythme naturel par defaut
     // Menu temporaire non organisé : option EN MEMOIRE SEULEMENT, remise à faux à chaque lancement.
     private volatile boolean includeEstimated = false;
     // Un téléchargement lancé sous l'ancien filtre ne peut jamais ajouter un match après bascule.
@@ -88,9 +88,11 @@ public final class MainActivity extends Activity {
         boolean checked = false, favorite = false, showResult = false, loadingStates = false;
         String mode = "play";
         int speed = 1, step = 0;
+        final double tempo;
+        long dueAt = 0L;
         final ArrayList<JSONObject> states = new ArrayList<>();
         boolean loaded = false, complete = false;
-        TrainingMatch(JSONObject obj) { match=obj; id=obj.optLong("match_id",-1); }
+        TrainingMatch(JSONObject obj) { match=obj; id=obj.optLong("match_id",-1); tempo=0.88+(Math.abs(id*37L+117L)%25)/100.0; }
         JSONObject current() {
             if (states.isEmpty()) return null;
             return states.get(Math.min(Math.max(0,step),states.size()-1));
@@ -692,7 +694,7 @@ public final class MainActivity extends Activity {
         // * signale sans ambiguïté une cote estimée par Booker, jamais par Android.
         return odds(state,key)+(state.optBoolean("is_estimated",false)?"*":"");
     }
-    // V1.25 : lignes de scores compactes inspirees du tableau du client PC V845.
+    // V1.26 : lignes de scores compactes inspirees du tableau du client PC V845.
     // Les colonnes AVM, LIVE, sets, jeux et points sont alignees entre J1 et J2.
     private TextView gridCell(String value, int size, int color, boolean bold, int gravity) {
         TextView t=tv(value,size,color,bold);
@@ -726,6 +728,7 @@ public final class MainActivity extends Activity {
             if(!m.tournament.equals(lastTournament)){
                 lastTournament=m.tournament;
                 String title=m.tournament;
+                if(title==null||title.trim().isEmpty()||title.equalsIgnoreCase("null"))title="Tournoi non renseigné";
                 String year=m.match.optString("match_date","");
                 if(year.length()>=4)title+="  |  "+year.substring(0,4);
                 TextView header=tv("▰  "+title,11,0xffecf3f7,true);
@@ -737,61 +740,58 @@ public final class MainActivity extends Activity {
             LinearLayout line=row();line.setGravity(Gravity.CENTER_VERTICAL);
             line.setPadding(dp(1),dp(3),dp(1),dp(3));
             line.setBackgroundColor(m.id==activeId?0xff18392e:0xff0d1b27);
-            // Actions laterales de la version PC : favoris et cases de controle.
+            // Tableau PC : UNE seule grille horizontale, deux lignes de joueurs.
+            // Les cotes, les sets et les points sont alignes sur chaque joueur.
             LinearLayout leading=col();leading.setGravity(Gravity.CENTER);
-            TextView star=tv(m.favorite?"★":"☆",19,m.favorite?0xfff2c94c:0xff7b90a1,false);
+            TextView star=tv(m.favorite?"★":"☆",16,m.favorite?0xfff2c94c:0xff7b90a1,false);
             star.setGravity(Gravity.CENTER);star.setContentDescription("Favori");
             star.setOnClickListener(v->{m.favorite=!m.favorite;saveSelection();renderList();});
-            leading.addView(star,new LinearLayout.LayoutParams(dp(26),dp(24)));
+            leading.addView(star,new LinearLayout.LayoutParams(dp(25),dp(28)));
             CheckBox check=new CheckBox(this);check.setButtonTintList(ColorStateList.valueOf(GREEN));check.setChecked(m.checked);
             check.setPadding(0,0,0,0);check.setMinWidth(0);check.setMinimumWidth(0);
             check.setOnCheckedChangeListener((v,checked)->{m.checked=checked;saveSelection();updatePlaybackStatus();});
-            leading.addView(check,new LinearLayout.LayoutParams(dp(29),dp(32)));
-            line.addView(leading,new LinearLayout.LayoutParams(dp(30),dp(60)));
-            // Tableau de deux lignes : en tete invisible en permanence pour gagner de la place.
+            leading.addView(check,new LinearLayout.LayoutParams(dp(29),dp(28)));
+            line.addView(leading,new LinearLayout.LayoutParams(dp(31),dp(57)));
             LinearLayout table=col();
+            // En-tetes et valeurs partagent les memes tailles de colonnes.
+            LinearLayout headings=row();
+            gridWeight(headings,gridCell("",8,MUTED,false,Gravity.LEFT));
+            gridWidth(headings,gridCell("AVM",8,MUTED,false,Gravity.CENTER),34);
+            gridWidth(headings,gridCell("LIVE",8,0xffffe267,false,Gravity.CENTER),38);
+            gridWidth(headings,gridCell("",8,MUTED,false,Gravity.CENTER),10);
+            gridWidth(headings,gridCell("S",8,MUTED,false,Gravity.CENTER),15);
+            gridWidth(headings,gridCell("J",8,MUTED,false,Gravity.CENTER),15);
+            gridWidth(headings,gridCell("PTS",8,MUTED,false,Gravity.CENTER),25);
+            table.addView(headings,new LinearLayout.LayoutParams(-1,dp(17)));
             for(int side=0;side<2;side++){
-                final boolean first=side==0;
+                boolean first=side==0;
                 LinearLayout r=row();
                 String player=first?m.player1:m.player2;
-                TextView name=gridCell(player,11,Color.WHITE,side==0,Gravity.CENTER_VERTICAL|Gravity.LEFT);
-                name.setContentDescription(player);
-                gridWeight(r,name);
-                TextView avm=gridCell(odds(m.match,first?"avm_odd1":"avm_odd2"),10,0xffe4e7ec,false,Gravity.CENTER);
-                gridWidth(r,avm,36);
-                TextView live=gridCell(currentOdds(m,first),10,0xffffe267,true,Gravity.CENTER);
-                gridWidth(r,live,42);
+                TextView name=gridCell(player,11,first?0xffe8f0f9:0xfff1f5fa,side==0,Gravity.LEFT|Gravity.CENTER_VERTICAL);
+                name.setContentDescription(player);gridWeight(r,name);
+                gridWidth(r,gridCell(odds(m.match,first?"avm_odd1":"avm_odd2"),10,0xffe4e7ec,false,Gravity.CENTER),34);
+                gridWidth(r,gridCell(currentOdds(m,first),10,0xffffe267,true,Gravity.CENTER),38);
                 String server=state==null?"":state.optString("server","");
                 boolean serving=server.equalsIgnoreCase(first?"J1":"J2")||server.equals(first?"1":"2");
-                TextView ball=gridCell(serving?"●":"",10,0xffefeb61,true,Gravity.CENTER);
-                gridWidth(r,ball,12);
-                TextView sets=gridCell(gridNum(state,first?"sets_p1":"sets_p2"),11,Color.WHITE,true,Gravity.CENTER);
-                gridWidth(r,sets,17);
-                TextView games=gridCell(gridNum(state,first?"games_p1":"games_p2"),11,Color.WHITE,false,Gravity.CENTER);
-                gridWidth(r,games,17);
-                TextView points=gridCell(gridNum(state,first?"points_p1":"points_p2"),11,0xffffdc41,true,Gravity.CENTER);
-                gridWidth(r,points,24);
+                gridWidth(r,gridCell(serving?"●":"",9,0xffefeb61,true,Gravity.CENTER),10);
+                gridWidth(r,gridCell(gridNum(state,first?"sets_p1":"sets_p2"),10,Color.WHITE,true,Gravity.CENTER),15);
+                gridWidth(r,gridCell(gridNum(state,first?"games_p1":"games_p2"),10,Color.WHITE,false,Gravity.CENTER),15);
+                gridWidth(r,gridCell(gridNum(state,first?"points_p1":"points_p2"),10,0xffffdc41,true,Gravity.CENTER),25);
                 table.addView(r,new LinearLayout.LayoutParams(-1,dp(21)));
             }
-            // Etat + controles en une seule ligne, sans cartes arrondies.
-            LinearLayout small=row();
-            String phase=m.showResult?"TERMINÉ":(!m.loaded?(m.loadingStates?"CHARGEMENT":"EN ATTENTE"):("ÉTAT "+(m.step+1)+"/"+m.states.size()));
-            TextView meta=gridCell(phase,9,0xff9ab1c2,false,Gravity.CENTER_VERTICAL);
-            small.addView(meta,new LinearLayout.LayoutParams(0,dp(24),1));
-            TextView games=gridCell("JEUX",9,0xffa8d9ee,true,Gravity.CENTER);
-            games.setOnClickListener(v->showGameDetails(m));
-            small.addView(games,new LinearLayout.LayoutParams(dp(38),dp(30)));
-            TextView result=gridCell("Résultats",9,Color.WHITE,true,Gravity.CENTER);
-            result.setBackgroundColor(0xff34404b);result.setOnClickListener(v->showResult(m));
-            small.addView(result,new LinearLayout.LayoutParams(dp(57),dp(30)));
-            TextView st=gridCell("ST",9,0xffadb9bf,true,Gravity.CENTER);
-            st.setBackgroundColor(0xff28343d);
-            st.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("ST — suivi").setMessage("Indicateur ST de l'application PC : calcul métier non encore porté dans Android. Aucune valeur fictive n'est affichée.").setPositiveButton("OK",null).show());
-            small.addView(st,new LinearLayout.LayoutParams(dp(23),dp(30)));
-            table.addView(small);
-            line.addView(table,new LinearLayout.LayoutParams(0,-2,1));
+            line.addView(table,new LinearLayout.LayoutParams(0,dp(60),1));
+            // Actions compactes dans la meme hauteur, sans troisieme ligne.
+            LinearLayout tools=col();tools.setGravity(Gravity.CENTER);
+            TextView results=gridCell("R",10,Color.WHITE,true,Gravity.CENTER);
+            results.setContentDescription("Résultats");results.setBackgroundColor(0xff34404b);
+            results.setOnClickListener(v->showResult(m));
+            tools.addView(results,new LinearLayout.LayoutParams(dp(26),dp(29)));
+            TextView jeux=gridCell("J",10,0xffa8d9ee,true,Gravity.CENTER);
+            jeux.setContentDescription("Détails des jeux");jeux.setOnClickListener(v->showGameDetails(m));
+            tools.addView(jeux,new LinearLayout.LayoutParams(dp(26),dp(27)));
+            line.addView(tools,new LinearLayout.LayoutParams(dp(29),dp(60)));
             line.setOnClickListener(v->{activeId=m.id;saveSelection();renderBanner();renderList();fetchStates(m,false);});
-            margin(line,listHost,-1,80,0,1,0,0);
+            margin(line,listHost,-1,65,0,1,0,0);
             View separator=new View(this);separator.setBackgroundColor(0xff25333f);
             listHost.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));
         }
@@ -969,7 +969,9 @@ public final class MainActivity extends Activity {
             if(!(m.mode.equals("play")||m.mode.equals("rewind")||m.mode.equals("fast_forward")))continue;
             Long lastTick=tickHistory.get(m.id);
             long base=pcRhythm?transitionDelay(m):QUICK_STEP_MS;
-            long interval=Math.max(130,base/Math.max(1,m.speed));
+            long variation= Math.abs((m.id*7919L + (long)m.step*104729L) % 19L) - 9L;
+            long varied=Math.round(base*m.tempo*(1.0+variation/100.0));
+            long interval=Math.max(130,varied/Math.max(1,m.speed));
             if(lastTick!=null&&now-lastTick<interval)continue;
             tickHistory.put(m.id,now);
             int delta=m.mode.equals("rewind")?-1:1;
