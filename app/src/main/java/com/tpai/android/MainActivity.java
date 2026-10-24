@@ -46,12 +46,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.33 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.34 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres; scores PBP uniquement si verifies.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V133_PC_TRAINING_CASCADE";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V134_PC_TRAINING_CASCADE";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -814,71 +814,122 @@ public final class MainActivity extends Activity {
         try{return Integer.parseInt(v);}catch(Exception ex){return -1;}
     }
     /**
-     * Each decoded game is checked in isolation. A lossy game never suppresses a valid
-     * neighbouring game. LIVE rows are associated only using uniquely matching cumulative
-     * point totals for a fully verified consecutive P2P prefix. Missing P2P games make
-     * the cumulative offset indeterminate; no guessed intermediate point or odds are used.
+     * V1.34: reconstruction locale, jeu par jeu, sans utiliser les cumuls depuis
+     * le debut du match. Chaque plage LIVE (set, jeux) est alignee par ses DELTAS
+     * de points avec les prefixes P2P; seuls les alignements UNIQUES sont exposes.
+     * Les donnees et cotes originales sont toujours preservees.
      */
     private static void loadVerifiedPointScores(TrainingMatch m){
         HashMap<Integer,String[]> verified=new HashMap<>();
+        int invalidGames=0, ambiguousRuns=0, matchingRuns=0, missingRuns=0;
         try{
-            JSONArray games=SupabaseApi.list("p2p_games",SupabaseApi.args(
+            JSONArray rows=SupabaseApi.list("p2p_games",SupabaseApi.args(
                 "select","set_no,game_no,point_winners,points_count,is_tiebreak,decode_mode,confidence,lossy",
                 "match_id","eq."+m.id,"order","set_no.asc,game_no.asc","limit","1500"));
-            Map<String,String[]> byTotals=new HashMap<>();
-            Set<String> duplicates=new HashSet<>();
-            int running1=0,running2=0;
-            boolean prefixReliable=true;
-            int lastSet=-1,lastGame=-1;
-            for(int i=0;i<games.length();i++){
-                JSONObject g=games.optJSONObject(i);
-                if(g==null){prefixReliable=false;continue;}
-                int set=g.optInt("set_no",-1),game=g.optInt("game_no",-1);
-                if(lastSet==set && game!=lastGame+1)prefixReliable=false;
-                if(lastSet>=0 && set!=lastSet && (set!=lastSet+1||game!=1))prefixReliable=false;
-                if(lastSet<0 && (set!=1||game!=1))prefixReliable=false;
-                lastSet=set;lastGame=game;
+            Map<String,ArrayList<String[]>> byGame=new HashMap<>();
+            Map<String,ArrayList<int[]>> byGameCounts=new HashMap<>();
+            for(int j=0;j<rows.length();j++){
+                JSONObject g=rows.optJSONObject(j);if(g==null)continue;
                 String seq=g.optString("point_winners","").trim();
                 String mode=g.optString("decode_mode","").toLowerCase(Locale.ROOT);
                 String conf=g.optString("confidence","").toLowerCase(Locale.ROOT);
                 if(!seq.matches("[12]+")||seq.length()!=g.optInt("points_count",-1)
                    ||g.optInt("lossy",1)!=0||mode.contains("unknown")||conf.contains("low")
-                   ||conf.contains("unknown")){prefixReliable=false;continue;}
+                   ||conf.contains("unknown")){invalidGames++;continue;}
                 boolean tie=g.optInt("is_tiebreak",0)!=0;
-                int a=0,b=0;
-                ArrayList<String[]> gamePoints=new ArrayList<>();
-                boolean valid=true;
-                // A true super-tiebreak requires an explicit match format. Do not infer 10
-                // only from the terminal score of a long normal tie-break.
+                int a=0,b=0;boolean valid=true;
+                ArrayList<String[]> scores=new ArrayList<>();
+                ArrayList<int[]> counts=new ArrayList<>();
+                scores.add(new String[]{"0","0"});counts.add(new int[]{0,0});
                 for(int n=0;n<seq.length();n++){
                     if(seq.charAt(n)=='1')a++;else b++;
                     boolean finished=tie?(Math.max(a,b)>=7&&Math.abs(a-b)>=2):
                         (Math.max(a,b)>=4&&Math.abs(a-b)>=2);
                     if(finished&&n!=seq.length()-1){valid=false;break;}
-                    if(n==seq.length()-1&&!finished){valid=false;break;}
-                    if(finished){
-                        gamePoints.add(new String[]{a>b?"JEU":standard(a,b,tie),b>a?"JEU":standard(b,a,tie)});
-                    }else gamePoints.add(new String[]{standard(a,b,tie),standard(b,a,tie)});
+                    // For a super tie-break or an incomplete but valid prefix,
+                    // do not invent the result; intermediate points remain usable.
+                    scores.add(new String[]{finished?(a>b?"JEU":standard(a,b,tie)):standard(a,b,tie),
+                        finished?(b>a?"JEU":standard(b,a,tie)):standard(b,a,tie)});
+                    counts.add(new int[]{a,b});
                 }
-                if(!valid){prefixReliable=false;continue;}
-                if(prefixReliable){
-                    for(int n=0;n<seq.length();n++){
-                        if(seq.charAt(n)=='1')running1++;else running2++;
-                        String key=running1+":"+running2;
-                        if(byTotals.containsKey(key))duplicates.add(key);
-                        byTotals.put(key,gamePoints.get(n));
+                if(!valid){invalidGames++;continue;}
+                String key=g.optInt("set_no",-1)+":"+g.optInt("game_no",-1);
+                if(byGame.containsKey(key)){byGame.remove(key);byGameCounts.remove(key);invalidGames++;continue;}
+                byGame.put(key,scores);byGameCounts.put(key,counts);
+            }
+            // A LIVE run is a maximal consecutive series with identical set/game
+            // counters. It need not begin at 0-0. Search all possible local P2P
+            // offsets and only keep scores if the offset is UNIQUE.
+            int start=0;
+            while(start<m.states.size()){
+                JSONObject first=m.states.get(start);
+                int end=start+1;
+                while(end<m.states.size()&&sameGame(first,m.states.get(end)))end++;
+                String gameKey=liveGameKey(first);
+                ArrayList<String[]> candidates=byGame.get(gameKey);
+                ArrayList<int[]> counts=byGameCounts.get(gameKey);
+                if(candidates==null){missingRuns++;start=end;continue;}
+                int base1=numericPoint(first,"points_p1"),base2=numericPoint(first,"points_p2");
+                if(base1<0||base2<0){missingRuns++;start=end;continue;}
+                ArrayList<Integer> validOffsets=new ArrayList<>();
+                for(int offset=0;offset<counts.size();offset++){
+                    boolean compatible=true;
+                    int prev1=base1,prev2=base2;
+                    for(int i=start;i<end;i++){
+                        JSONObject live=m.states.get(i);
+                        int x=numericPoint(live,"points_p1"),y=numericPoint(live,"points_p2");
+                        if(x<base1||y<base2||x<prev1||y<prev2){compatible=false;break;}
+                        int want1=counts.get(offset)[0]+x-base1;
+                        int want2=counts.get(offset)[1]+y-base2;
+                        boolean located=false;
+                        for(int t=offset;t<counts.size();t++){
+                            int[] pair=counts.get(t);
+                            if(pair[0]==want1&&pair[1]==want2){located=true;break;}
+                        }
+                        if(!located){compatible=false;break;}
+                        prev1=x;prev2=y;
                     }
+                    if(compatible)validOffsets.add(offset);
                 }
+                // For a single LIVE row a non-zero unknown initial offset cannot
+                // be inferred. Never arbitrarily choose one of several candidates.
+                if(validOffsets.size()==1){
+                    int offset=validOffsets.get(0);
+                    for(int i=start;i<end;i++){
+                        JSONObject e=m.states.get(i);
+                        int target1=counts.get(offset)[0]+numericPoint(e,"points_p1")-base1;
+                        int target2=counts.get(offset)[1]+numericPoint(e,"points_p2")-base2;
+                        for(int k=offset;k<counts.size();k++){
+                            if(counts.get(k)[0]==target1&&counts.get(k)[1]==target2){
+                                verified.put(i,candidates.get(k));break;
+                            }
+                        }
+                    }
+                    matchingRuns++;
+                }else ambiguousRuns++;
+                start=end;
             }
-            for(int i=0;i<m.states.size();i++){
-                JSONObject e=m.states.get(i);
-                int a=numericPoint(e,"points_p1"),b=numericPoint(e,"points_p2");
-                if(a<0||b<0)continue;
-                String key=a+":"+b;
-                if(!duplicates.contains(key)&&byTotals.containsKey(key))verified.put(i,byTotals.get(key));
-            }
-        }catch(Exception ignored){/* réseau ou schema indisponible : aucun point imaginé */}
+        }catch(Exception e){android.util.Log.w("TPAI_PTS","Match "+m.id+" : lecture P2P impossible",e);}
         synchronized(m.verifiedPoints){m.verifiedPoints.clear();m.verifiedPoints.putAll(verified);}
+        android.util.Log.i("TPAI_PTS","match="+m.id+" live="+m.states.size()+
+            " aligned="+verified.size()+" unmatched="+(m.states.size()-verified.size())+
+            " matchingRuns="+matchingRuns+" ambiguousRuns="+ambiguousRuns+
+            " missingRuns="+missingRuns+" invalidGames="+invalidGames);
+    }
+    private static boolean sameGame(JSONObject a,JSONObject b){
+        return a.optInt("sets_p1",-1)==b.optInt("sets_p1",-1)
+            &&a.optInt("sets_p2",-1)==b.optInt("sets_p2",-1)
+            &&a.optInt("games_p1",-1)==b.optInt("games_p1",-1)
+            &&a.optInt("games_p2",-1)==b.optInt("games_p2",-1);
+    }
+    private static String liveGameKey(JSONObject e){
+        // Only exact set/game ordinal available when complete previous-set
+        // scores are known. LIVE stores set WINS, not the current set ordinal:
+        // this is only a tentative key, so incorrect matches are never accepted
+        // solely by the key; point deltas must still match.
+        int set=e.optInt("sets_p1",-1)+e.optInt("sets_p2",-1)+1;
+        int game=e.optInt("games_p1",-1)+e.optInt("games_p2",-1)+1;
+        return set+":"+game;
     }
     private void renderList(){
         if(listHost==null)return;

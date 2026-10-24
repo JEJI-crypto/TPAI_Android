@@ -1,15 +1,21 @@
-# TPAI Android V1.33 — Interface minimaliste
+# TPAI Android V1.34 — Reconstruction PTS par jeu
 
-- Menu ☰ et filtre « Côtes estimées incluses », décoché au lancement.
-- Recherche ⌕ et ajout ＋ dans la barre supérieure.
-- Quatre matchs éligibles cherchés aléatoirement au démarrage, sans sélection automatique du bandeau.
-- Bandeau et commandes de lecture visibles seulement après clic sur un match, boutons **immédiatement sous le bandeau**.
-- Opérations de liste dans ⋮ ; catégorie/tournoi/saison/match dans ＋.
-- Accès distant exclusif REST Supabase schéma `tpai`; cotes réelles Booker, sans estimation Android.
-- Tirage indexé par `match_id` en petits lots, avec nouvelle tentative limitée sur timeout.
+Cette version conserve la liste, le balayage vers la droite pour supprimer et le curseur caché par défaut (icône ⏩).
 
-**Limites** : la durée de tirage dépend de la disponibilité des matchs complets et du serveur ; le projet ne contient aucun accès direct à PostgreSQL et n'a pas été testé sur le téléphone.
+## Reconstruction des scores
 
-Après téléchargement du ZIP dans Download, exécuter `tpai` depuis Termux.
+- Lecture des séquences `tpai.p2p_games.point_winners` et contrôle de `points_count`, `lossy`, `confidence` et `decode_mode`.
+- Reconstruction du score standard, jeu par jeu, y compris points numériques en tie-break.
+- Segmentation des lignes LIVE en plages de score de sets/jeux identique.
+- Alignement des variations de compteurs de chaque plage LIVE avec les points P2P possibles de ce jeu. Si plusieurs positions sont plausibles, l'affichage reste `—` : aucun score inventé.
+- Ne modifie aucune table Supabase. Les cotes restent attachées aux états LIVE d'origine.
 
-V1.33 : workflow controle versionCode/versionName dynamiquement (sans numero precedent code en dur).
+## Diagnostic
+
+Dans `adb logcat -s TPAI_PTS:I`, une ligne par match résume `live`, `aligned`, `unmatched`, `matchingRuns`, `ambiguousRuns`, `missingRuns` et `invalidGames`.
+
+Important : ce correctif améliore la méthode d'alignement mais ne garantit pas l'élimination des tirets quand les états LIVE ne permettent pas de déduire un point précis. Les correspondances doivent être vérifiées sur le téléphone et sur les données réelles.
+
+## Installation
+
+Placer `TPAI_Android_GitHub_V1.34.zip` dans Download, puis exécuter `tpai` dans Termux. GitHub Actions doit produire `TPAI_Android_V1.34.apk`.
