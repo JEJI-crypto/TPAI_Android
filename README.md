@@ -1,4 +1,4 @@
-# TPAI Android V1.32 — Interface minimaliste
+# TPAI Android V1.33 — Interface minimaliste
 
 - Menu ☰ et filtre « Côtes estimées incluses », décoché au lancement.
 - Recherche ⌕ et ajout ＋ dans la barre supérieure.
@@ -12,4 +12,4 @@
 
 Après téléchargement du ZIP dans Download, exécuter `tpai` depuis Termux.
 
-V1.32 : workflow controle versionCode/versionName dynamiquement (sans numero precedent code en dur).
+V1.33 : workflow controle versionCode/versionName dynamiquement (sans numero precedent code en dur).

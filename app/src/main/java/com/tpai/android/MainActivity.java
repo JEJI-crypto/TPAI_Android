@@ -46,12 +46,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.32 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.33 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres; scores PBP uniquement si verifies.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V132_PC_TRAINING_CASCADE";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V133_PC_TRAINING_CASCADE";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -70,6 +70,7 @@ public final class MainActivity extends Activity {
     private boolean inProgress = false;
     private LinearLayout listHost, bannerHost, filterHost, root, transportHost;
     private long revealedMatchId=-1;
+    private boolean progressVisible=false;
     private ScrollView listScroll;
     private TextView status, counter, playbackStatus;
     private EditText playerSearch;
@@ -785,7 +786,7 @@ public final class MainActivity extends Activity {
         String value=state.optString(key,"").trim();
         return value.length()==0 || value.equals("null")?"–":value;
     }
-    /** Scores certifiés reconstruits exclusivement depuis point_winners et rapprochés des cumuls LIVE. */
+    /** Les scores standards proviennent exclusivement des gagnants P2P, jamais des cumuls bruts. */
     private String tennisPoints(TrainingMatch m,JSONObject e){
         return tennisPointForSide(m,e,true)+" - "+tennisPointForSide(m,e,false);
     }
@@ -801,64 +802,83 @@ public final class MainActivity extends Activity {
             if(a==b)return "40";
             if(a==b+1)return "AV";
             if(b==a+1)return "40";
-            return "—";
+            return "JEU";
         }
         if(a>=4&&a-b>=2)return "JEU";
         if(a>3)return "40";
         return new String[]{"0","15","30","40"}[a];
     }
+    private static int numericPoint(JSONObject e,String key){
+        String v=e.optString(key,"");
+        if(!v.matches("[0-9]+"))return -1;
+        try{return Integer.parseInt(v);}catch(Exception ex){return -1;}
+    }
     /**
-     * Contrôles stricts: séquence de gagnants, nombre de points, jeu fini,
-     * décodage non lossy, et correspondance UNIQUE des cumuls avec live_states.
-     * Aucun score n'est extrapolé lorsqu'il manque des données.
+     * Each decoded game is checked in isolation. A lossy game never suppresses a valid
+     * neighbouring game. LIVE rows are associated only using uniquely matching cumulative
+     * point totals for a fully verified consecutive P2P prefix. Missing P2P games make
+     * the cumulative offset indeterminate; no guessed intermediate point or odds are used.
      */
     private static void loadVerifiedPointScores(TrainingMatch m){
+        HashMap<Integer,String[]> verified=new HashMap<>();
         try{
             JSONArray games=SupabaseApi.list("p2p_games",SupabaseApi.args(
                 "select","set_no,game_no,point_winners,points_count,is_tiebreak,decode_mode,confidence,lossy",
-                "match_id","eq."+m.id,"order","set_no.asc,game_no.asc","limit","1000"));
-            HashMap<String,String[]> reconstructed=new HashMap<>();
-            HashSet<String> ambiguous=new HashSet<>();
-            int total1=0,total2=0;
+                "match_id","eq."+m.id,"order","set_no.asc,game_no.asc","limit","1500"));
+            Map<String,String[]> byTotals=new HashMap<>();
+            Set<String> duplicates=new HashSet<>();
+            int running1=0,running2=0;
+            boolean prefixReliable=true;
+            int lastSet=-1,lastGame=-1;
             for(int i=0;i<games.length();i++){
-                JSONObject game=games.getJSONObject(i);
-                String sequence=game.optString("point_winners","");
-                if(sequence.isEmpty()||!sequence.matches("[12]+")||sequence.length()!=game.optInt("points_count",-1)
-                  ||game.optInt("lossy",1)!=0)return;
-                String mode=game.optString("decode_mode","").toLowerCase(Locale.ROOT);
-                String conf=game.optString("confidence","").toLowerCase(Locale.ROOT);
-                if(mode.contains("unknown")||conf.contains("low")||conf.contains("unknown"))return;
-                boolean tie=game.optInt("is_tiebreak",0)!=0;
+                JSONObject g=games.optJSONObject(i);
+                if(g==null){prefixReliable=false;continue;}
+                int set=g.optInt("set_no",-1),game=g.optInt("game_no",-1);
+                if(lastSet==set && game!=lastGame+1)prefixReliable=false;
+                if(lastSet>=0 && set!=lastSet && (set!=lastSet+1||game!=1))prefixReliable=false;
+                if(lastSet<0 && (set!=1||game!=1))prefixReliable=false;
+                lastSet=set;lastGame=game;
+                String seq=g.optString("point_winners","").trim();
+                String mode=g.optString("decode_mode","").toLowerCase(Locale.ROOT);
+                String conf=g.optString("confidence","").toLowerCase(Locale.ROOT);
+                if(!seq.matches("[12]+")||seq.length()!=g.optInt("points_count",-1)
+                   ||g.optInt("lossy",1)!=0||mode.contains("unknown")||conf.contains("low")
+                   ||conf.contains("unknown")){prefixReliable=false;continue;}
+                boolean tie=g.optInt("is_tiebreak",0)!=0;
                 int a=0,b=0;
-                int threshold=7;
-                // Les super tie-breaks en 10 points ne doivent pas être assimilés aux tie-breaks à 7.
-                if(tie && sequence.length()>0){
-                    int f1=0,f2=0;for(char c:sequence.toCharArray()){if(c=='1')f1++;else f2++;}
-                    if(Math.max(f1,f2)>=10)threshold=10;
-                }
-                for(int point=0;point<sequence.length();point++){
-                    if(sequence.charAt(point)=='1'){a++;total1++;}else{b++;total2++;}
-                    boolean finished=tie?(Math.max(a,b)>=threshold&&Math.abs(a-b)>=2):
+                ArrayList<String[]> gamePoints=new ArrayList<>();
+                boolean valid=true;
+                // A true super-tiebreak requires an explicit match format. Do not infer 10
+                // only from the terminal score of a long normal tie-break.
+                for(int n=0;n<seq.length();n++){
+                    if(seq.charAt(n)=='1')a++;else b++;
+                    boolean finished=tie?(Math.max(a,b)>=7&&Math.abs(a-b)>=2):
                         (Math.max(a,b)>=4&&Math.abs(a-b)>=2);
-                    if(finished && point!=sequence.length()-1)return;
-                    String left=finished?"JEU":standard(a,b,tie);
-                    String right=finished?"JEU":standard(b,a,tie);
-                    if(finished){if(a>b)right=standard(b,a,tie);else left=standard(a,b,tie);}
-                    String key=total1+":"+total2;
-                    if(reconstructed.containsKey(key))ambiguous.add(key);
-                    else reconstructed.put(key,new String[]{left,right});
+                    if(finished&&n!=seq.length()-1){valid=false;break;}
+                    if(n==seq.length()-1&&!finished){valid=false;break;}
+                    if(finished){
+                        gamePoints.add(new String[]{a>b?"JEU":standard(a,b,tie),b>a?"JEU":standard(b,a,tie)});
+                    }else gamePoints.add(new String[]{standard(a,b,tie),standard(b,a,tie)});
+                }
+                if(!valid){prefixReliable=false;continue;}
+                if(prefixReliable){
+                    for(int n=0;n<seq.length();n++){
+                        if(seq.charAt(n)=='1')running1++;else running2++;
+                        String key=running1+":"+running2;
+                        if(byTotals.containsKey(key))duplicates.add(key);
+                        byTotals.put(key,gamePoints.get(n));
+                    }
                 }
             }
-            HashMap<Integer,String[]> verified=new HashMap<>();
             for(int i=0;i<m.states.size();i++){
                 JSONObject e=m.states.get(i);
-                String a=e.optString("points_p1",""),b=e.optString("points_p2","");
-                if(!a.matches("[0-9]+")||!b.matches("[0-9]+"))continue;
+                int a=numericPoint(e,"points_p1"),b=numericPoint(e,"points_p2");
+                if(a<0||b<0)continue;
                 String key=a+":"+b;
-                if(!ambiguous.contains(key)&&reconstructed.containsKey(key))verified.put(i,reconstructed.get(key));
+                if(!duplicates.contains(key)&&byTotals.containsKey(key))verified.put(i,byTotals.get(key));
             }
-            synchronized(m.verifiedPoints){m.verifiedPoints.clear();m.verifiedPoints.putAll(verified);}
-        }catch(Exception ignored){/* Colonne absente / format incompatible : pas de score inventé. */}
+        }catch(Exception ignored){/* réseau ou schema indisponible : aucun point imaginé */}
+        synchronized(m.verifiedPoints){m.verifiedPoints.clear();m.verifiedPoints.putAll(verified);}
     }
     private void renderList(){
         if(listHost==null)return;
@@ -922,7 +942,7 @@ public final class MainActivity extends Activity {
                 table.addView(r,new LinearLayout.LayoutParams(-1,dp(21)));
             }
             line.addView(table,new LinearLayout.LayoutParams(0,dp(60),1));
-            line.setOnClickListener(v->{activeId=m.id;saveSelection();renderBanner();renderList();fetchStates(m,false);});
+            line.setOnClickListener(v->{activeId=m.id;progressVisible=false;saveSelection();renderBanner();renderList();fetchStates(m,false);});
             attachSwipeRow(m,line);
             View separator=new View(this);separator.setBackgroundColor(0xff25333f);
             listHost.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));
@@ -948,7 +968,13 @@ public final class MainActivity extends Activity {
         String time=m.match.optString("match_time","");
         TextView comp=tv("◉  "+tournament+"  |  "+date+(time.isEmpty()?"":" "+time),9,MUTED,false);
         comp.setGravity(Gravity.CENTER);comp.setSingleLine(true);comp.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        margin(comp,bannerHost,-1,22,4,0,4,0);
+        LinearLayout competitionLine=row();competitionLine.setGravity(Gravity.CENTER_VERTICAL);
+        competitionLine.addView(comp,new LinearLayout.LayoutParams(0,dp(36),1));
+        Button reveal=button("⏩",progressVisible?0xff176744:0xff172832);
+        reveal.setTextSize(16);reveal.setContentDescription(progressVisible?"Masquer la progression":"Afficher la progression");
+        reveal.setOnClickListener(v->{progressVisible=!progressVisible;renderBanner();});
+        competitionLine.addView(reveal,new LinearLayout.LayoutParams(dp(48),dp(36)));
+        margin(competitionLine,bannerHost,-1,36,4,0,4,0);
         LinearLayout upper=row();upper.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout p1=compactPlayer(m,true,e),p2=compactPlayer(m,false,e);
         upper.addView(p1,new LinearLayout.LayoutParams(0,dp(112),1));
@@ -977,7 +1003,7 @@ public final class MainActivity extends Activity {
             scoreBoard.addView(r,new LinearLayout.LayoutParams(-1,dp(25)));
         }
         margin(scoreBoard,bannerHost,-1,-2,dp(2),dp(2),dp(2),dp(3));
-        if(m.loaded&&m.states.size()>1&&!m.showResult){
+        if(progressVisible&&m.loaded&&m.states.size()>1&&!m.showResult){
             SeekBar seek=new SeekBar(this);
             seek.setMax(m.states.size()-1);seek.setProgress(Math.min(m.step,m.states.size()-1));
             seek.setProgressTintList(ColorStateList.valueOf(GREEN));seek.setThumbTintList(ColorStateList.valueOf(GREEN));
@@ -1092,7 +1118,7 @@ public final class MainActivity extends Activity {
                         renderList();return true;
                     }
                     if(revealedMatchId==m.id){revealedMatchId=-1;renderList();}
-                    else{activeId=m.id;saveSelection();renderBanner();renderList();fetchStates(m,false);}
+                    else{activeId=m.id;progressVisible=false;saveSelection();renderBanner();renderList();fetchStates(m,false);}
                     return true;
                 case MotionEvent.ACTION_CANCEL:
                     listScroll.requestDisallowInterceptTouchEvent(false);
