@@ -15,6 +15,13 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
 import android.widget.Button;
+import android.widget.ImageView;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
+import java.net.URL;
+import java.net.HttpURLConnection;
+import java.io.InputStream;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
@@ -37,12 +44,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.26 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.27 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres, non le moteur PC PBP complet.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V126_PC_GRID_NATURAL_CLOCKS";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V127_PC_TRAINING_CASCADE";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -66,6 +73,8 @@ public final class MainActivity extends Activity {
     private EditText playerSearch;
     private Button randomButton;
     private String selectedCategory = "", selectedTournament = "", selectedSeason = "";
+    private String selectedCategoryLabel="", selectedTournamentLabel="";
+    private final Map<String,Bitmap> portraits=new HashMap<>();
     private long activeId = -1;
     private int randomCount = 4;
     private String lastPlaybackMode = "Lecture normale";
@@ -182,12 +191,6 @@ public final class MainActivity extends Activity {
         margin(hamburger,topbar,44,44,0,0,7,0);
         TextView title=tv("TPAI",20,Color.WHITE,true);
         topbar.addView(title,new LinearLayout.LayoutParams(0,dp(44),1));
-        Button search=button("⌕",0xff101820);search.setTextSize(26);
-        search.setContentDescription("Rechercher un joueur");search.setOnClickListener(v->showSearchDialog());
-        margin(search,topbar,44,44,2,0,3,0);
-        Button add=button("＋",0xff133443);add.setTextSize(25);
-        add.setContentDescription("Choisir et ajouter des matchs");add.setOnClickListener(v->showAddMenu());
-        margin(add,topbar,44,44,1,0,0,0);
         margin(topbar,root,-1,47,0,0,0,4);
         subtitleView=tv("MATCHS D’ENTRAÎNEMENT",12,GREEN,true);
         margin(subtitleView,root,-1,25,4,0,0,2);
@@ -218,6 +221,12 @@ public final class MainActivity extends Activity {
         listBar.addView(counter,new LinearLayout.LayoutParams(0,dp(42),1));
         Button actions=button("⋮",0xff19232b);actions.setTextSize(23);
         actions.setContentDescription("Options de la liste");actions.setOnClickListener(v->showListMenu());
+        Button search=button("⌕",0xff101820);search.setTextSize(22);
+        search.setContentDescription("Rechercher un joueur");search.setOnClickListener(v->showSearchDialog());
+        margin(search,listBar,41,42,0,0,3,0);
+        Button add=button("＋",0xff133443);add.setTextSize(22);
+        add.setContentDescription("Ajouter des matchs");add.setOnClickListener(v->showAddMenu());
+        margin(add,listBar,41,42,0,0,3,0);
         margin(actions,listBar,44,42,0,0,0,0);
         margin(listBar,root,-1,43,0,0,0,2);
         listScroll=new ScrollView(this);listScroll.setFillViewport(true);
@@ -244,12 +253,72 @@ public final class MainActivity extends Activity {
                 playerSearch.setText(entry.getText().toString());searchPlayer();
             }).show();
     }
+    /** Deux blocs uniquement : tirage aleatoire ou selection en cascade. */
     private void showAddMenu(){
+        LinearLayout body=col();body.setPadding(dp(16),dp(10),dp(16),dp(12));
+        TextView randomTitle=tv("1. MATCHS ALÉATOIRES",14,GREEN,true);
+        margin(randomTitle,body,-1,38,0,0,0,4);
+        Button randomAdd=button("Choisir de 1 à 10 matchs aléatoires",0xff133443);
+        randomAdd.setOnClickListener(v->showRandomOptions());margin(randomAdd,body,-1,48,0,0,0,14);
+        TextView title=tv("2. SÉLECTION MANUELLE",14,GREEN,true);
+        margin(title,body,-1,38,0,0,0,6);
+        Button choose=button("Catégorie  →  Tournoi  →  Saison  →  Matchs",0xff172832);
+        choose.setOnClickListener(v->categoryCascade());margin(choose,body,-1,55,0,0,0,4);
+        TextView hint=tv("Choisis d'abord une catégorie, puis les menus suivants deviennent disponibles.",12,MUTED,false);
+        margin(hint,body,-1,-2,0,0,0,4);
         new AlertDialog.Builder(this).setTitle("Ajouter des matchs")
-            .setItems(new String[]{"＋ Matchs aléatoires", "Catégories", "Tournois", "Saisons", "Matchs", "Effacer les filtres"},(d,n)->{
-                if(n==0)showRandomOptions();else if(n==1)categoryDialog();else if(n==2)tournamentDialog();
-                else if(n==3)seasonDialog();else if(n==4)matchesDialog();else clearFilters();
-            }).show();
+            .setView(body).setPositiveButton("FERMER",null).show();
+    }
+    private void categoryCascade(){
+        final String[] types={"ATP","WTA","Challenger","ITF"};
+        new AlertDialog.Builder(this).setTitle("1 / 4 · Catégorie")
+            .setItems(types,(dialog,pos)->{
+                selectedCategory=types[pos];selectedCategoryLabel=types[pos];
+                selectedTournament="";selectedTournamentLabel="";selectedSeason="";
+                tournamentCascade();
+            }).setNegativeButton("ANNULER",null).show();
+    }
+    private void tournamentCascade(){
+        final String category=selectedCategory;
+        work("Chargement des tournois " + category + "…",()->{
+            // Limite pour éviter les requêtes sur l'historique complet des matchs.
+            JSONArray rows=SupabaseApi.list("competitions",SupabaseApi.args("select","competition_id,name", "name","ilike.*"+cleanFilter(category)+"*", "order","name.asc", "limit","200"));
+            ArrayList<String> names=new ArrayList<>(), ids=new ArrayList<>();
+            for(int i=0;i<rows.length();i++){
+                JSONObject r=rows.getJSONObject(i);String name=r.optString("name","");
+                if(name.trim().isEmpty())continue;
+                names.add(name);ids.add(r.optString("competition_id"));
+            }
+            ui(()->{
+                if(names.isEmpty()){notice("Tournois","Aucun tournoi pour cette catégorie.");return;}
+                new AlertDialog.Builder(this).setTitle("2 / 4 · Tournoi · "+category)
+                    .setItems(names.toArray(new String[0]),(d,n)->{
+                        selectedTournament=ids.get(n);selectedTournamentLabel=names.get(n);selectedSeason="";
+                        seasonCascade();
+                    }).setNegativeButton("RETOUR",(d,w)->categoryCascade()).show();
+            });
+        });
+    }
+    private void seasonCascade(){
+        final String competitionId=selectedTournament;
+        work("Chargement des saisons…",()->{
+            // Lire une petite plage de dates parmi les matchs du tournoi sélectionné.
+            JSONArray rows=SupabaseApi.list("matches",SupabaseApi.args("select","match_date", "competition_id","eq."+competitionId, "order","match_date.desc", "limit","400"));
+            Set<String> years=new LinkedHashSet<>();
+            for(int i=0;i<rows.length();i++){
+                String date=rows.getJSONObject(i).optString("match_date","");
+                if(date.length()>=4)years.add(date.substring(0,4));
+            }
+            ui(()->{
+                if(years.isEmpty()){notice("Saisons","Aucune saison disponible pour ce tournoi.");return;}
+                ArrayList<String> options=new ArrayList<>(years);
+                new AlertDialog.Builder(this).setTitle("3 / 4 · Saison · "+selectedTournamentLabel)
+                    .setItems(options.toArray(new String[0]),(d,n)->{
+                        selectedSeason=options.get(n);
+                        matchesDialog();
+                    }).setNegativeButton("RETOUR",(d,w)->tournamentCascade()).show();
+            });
+        });
     }
     private void showRandomOptions(){
         String[] opts=new String[10];for(int i=0;i<10;i++)opts[i]=(i+1)+" match"+(i==0?"":"s");
@@ -435,7 +504,11 @@ public final class MainActivity extends Activity {
         m.states.addAll(loaded);
         m.loaded = true;
         m.complete = true;
-        m.step = 0;
+        // Ouvrir une rencontre comme un vrai flux LIVE pris en cours de jeu.
+        // Position stable et differente selon l'identifiant, loin du debut et de la fin.
+        int n=m.states.size();
+        int lo=Math.max(1,n/8), hi=Math.max(lo+1,n-n/7);
+        m.step=Math.min(n-2,lo+new Random(System.nanoTime() ^ (m.id*1000003L)).nextInt(Math.max(1,hi-lo)));
         m.showResult = false;
     }
 
@@ -479,7 +552,7 @@ public final class MainActivity extends Activity {
         }
         new AlertDialog.Builder(this).setTitle("Sélectionner les matchs · "+options.size()+" résultats")
             .setMultiChoiceItems(entries,chosen,(d,which,isChecked)->chosen[which]=isChecked)
-            .setPositiveButton("AJOUTER",(d,which)->{
+            .setPositiveButton("VALIDER",(d,which)->{
                 final ArrayList<TrainingMatch> requested=new ArrayList<>();
                 for(int i=0;i<options.size();i++)if(chosen[i])requested.add(options.get(i));
                 if(requested.isEmpty())return;
@@ -694,7 +767,7 @@ public final class MainActivity extends Activity {
         // * signale sans ambiguïté une cote estimée par Booker, jamais par Android.
         return odds(state,key)+(state.optBoolean("is_estimated",false)?"*":"");
     }
-    // V1.26 : lignes de scores compactes inspirees du tableau du client PC V845.
+    // V1.27 : lignes de scores compactes inspirees du tableau du client PC V845.
     // Les colonnes AVM, LIVE, sets, jeux et points sont alignees entre J1 et J2.
     private TextView gridCell(String value, int size, int color, boolean bold, int gravity) {
         TextView t=tv(value,size,color,bold);
@@ -713,6 +786,49 @@ public final class MainActivity extends Activity {
         if(state==null)return "–";
         String value=state.optString(key,"").trim();
         return value.length()==0 || value.equals("null")?"–":value;
+    }
+    /** Live_states peut contenir un total de points cumulés. Convertit les deltas du jeu actif
+     *  en tennis 0/15/30/40/AV, sans traiter 127 comme un score de jeu.
+     *  Si la source est ambiguë, afficher un tiret plutôt qu'un score inventé.
+     */
+    private String tennisPoints(TrainingMatch m,JSONObject e){
+        return tennisPointForSide(m,e,true)+" - "+tennisPointForSide(m,e,false);
+    }
+    private String tennisPointForSide(TrainingMatch m,JSONObject e,boolean first){
+        if(e==null)return "—";
+        String key=first?"points_p1":"points_p2";
+        String raw=e.optString(key,"").trim().toUpperCase(Locale.ROOT);
+        if(raw.equals("A")||raw.equals("AD")||raw.equals("40")||raw.equals("30")||raw.equals("15")||raw.equals("0"))return raw.equals("AD")?"A":raw;
+        int ix=m.states.indexOf(e);
+        if(ix<0)return "—";
+        // Les cumuls de points nécessitent la référence du DEBUT du jeu courant.
+        JSONObject cur=m.states.get(ix);
+        int cp1=cur.optInt("points_p1",-1),cp2=cur.optInt("points_p2",-1);
+        if(cp1<0||cp2<0)return "—";
+        int start=ix;
+        while(start>0){
+            JSONObject prev=m.states.get(start-1);
+            if(prev.optInt("games_p1",-1)!=cur.optInt("games_p1",-1)
+                ||prev.optInt("games_p2",-1)!=cur.optInt("games_p2",-1)
+                ||prev.optInt("sets_p1",-1)!=cur.optInt("sets_p1",-1)
+                ||prev.optInt("sets_p2",-1)!=cur.optInt("sets_p2",-1))break;
+            start--;
+        }
+        int baseline=Math.max(0,start-1);
+        JSONObject base=m.states.get(baseline);
+        int a=cp1-base.optInt("points_p1",cp1),b=cp2-base.optInt("points_p2",cp2);
+        if(a<0||b<0)return "—";
+        // Sans échantillon précédent le premier état enregistré, pas de score certain.
+        if(start==0)return "—";
+        boolean tie=cur.optInt("games_p1",0)>=6 && cur.optInt("games_p2",0)>=6;
+        if(tie)return String.valueOf(first?a:b);
+        if(a<=2&&b<=2)return new String[]{"0","15","30"}[first?a:b];
+        if(a>=3&&b<=2)return first?"40":new String[]{"0","15","30"}[b];
+        if(b>=3&&a<=2)return first?new String[]{"0","15","30"}[a]:"40";
+        if(a==b)return "40";
+        if(a==b+1)return first?"A":"40";
+        if(b==a+1)return first?"40":"A";
+        return "—";
     }
     private void renderList(){
         if(listHost==null)return;
@@ -756,8 +872,8 @@ public final class MainActivity extends Activity {
             // En-tetes et valeurs partagent les memes tailles de colonnes.
             LinearLayout headings=row();
             gridWeight(headings,gridCell("",8,MUTED,false,Gravity.LEFT));
-            gridWidth(headings,gridCell("AVM",8,MUTED,false,Gravity.CENTER),34);
-            gridWidth(headings,gridCell("LIVE",8,0xffffe267,false,Gravity.CENTER),38);
+            gridWidth(headings,gridCell("",8,MUTED,false,Gravity.CENTER),34);
+            gridWidth(headings,gridCell("",8,0xffffe267,false,Gravity.CENTER),38);
             gridWidth(headings,gridCell("",8,MUTED,false,Gravity.CENTER),10);
             gridWidth(headings,gridCell("S",8,MUTED,false,Gravity.CENTER),15);
             gridWidth(headings,gridCell("J",8,MUTED,false,Gravity.CENTER),15);
@@ -776,20 +892,10 @@ public final class MainActivity extends Activity {
                 gridWidth(r,gridCell(serving?"●":"",9,0xffefeb61,true,Gravity.CENTER),10);
                 gridWidth(r,gridCell(gridNum(state,first?"sets_p1":"sets_p2"),10,Color.WHITE,true,Gravity.CENTER),15);
                 gridWidth(r,gridCell(gridNum(state,first?"games_p1":"games_p2"),10,Color.WHITE,false,Gravity.CENTER),15);
-                gridWidth(r,gridCell(gridNum(state,first?"points_p1":"points_p2"),10,0xffffdc41,true,Gravity.CENTER),25);
+                gridWidth(r,gridCell(tennisPointForSide(m,state,first),10,0xffffdc41,true,Gravity.CENTER),25);
                 table.addView(r,new LinearLayout.LayoutParams(-1,dp(21)));
             }
             line.addView(table,new LinearLayout.LayoutParams(0,dp(60),1));
-            // Actions compactes dans la meme hauteur, sans troisieme ligne.
-            LinearLayout tools=col();tools.setGravity(Gravity.CENTER);
-            TextView results=gridCell("R",10,Color.WHITE,true,Gravity.CENTER);
-            results.setContentDescription("Résultats");results.setBackgroundColor(0xff34404b);
-            results.setOnClickListener(v->showResult(m));
-            tools.addView(results,new LinearLayout.LayoutParams(dp(26),dp(29)));
-            TextView jeux=gridCell("J",10,0xffa8d9ee,true,Gravity.CENTER);
-            jeux.setContentDescription("Détails des jeux");jeux.setOnClickListener(v->showGameDetails(m));
-            tools.addView(jeux,new LinearLayout.LayoutParams(dp(26),dp(27)));
-            line.addView(tools,new LinearLayout.LayoutParams(dp(29),dp(60)));
             line.setOnClickListener(v->{activeId=m.id;saveSelection();renderBanner();renderList();fetchStates(m,false);});
             margin(line,listHost,-1,65,0,1,0,0);
             View separator=new View(this);separator.setBackgroundColor(0xff25333f);
@@ -826,7 +932,7 @@ public final class MainActivity extends Activity {
         center.addView(sets);
         TextView games=tv("JEUX "+score(e,"games_p1","games_p2"),11,0xffbcd0d1,false);games.setGravity(Gravity.CENTER);
         center.addView(games);
-        TextView points=tv(score(e,"points_p1","points_p2"),17,0xffffd400,true);points.setGravity(Gravity.CENTER);
+        TextView points=tv(tennisPoints(m,e),17,0xffffd400,true);points.setGravity(Gravity.CENTER);
         center.addView(points);
         h.addView(center,new LinearLayout.LayoutParams(dp(104),dp(98)));
         h.addView(b,new LinearLayout.LayoutParams(0,dp(98),1));
@@ -868,13 +974,39 @@ public final class MainActivity extends Activity {
         LinearLayout out=col();out.setPadding(dp(3),dp(7),dp(3),dp(4));
         out.setBackground(bg(0xff242424,0xff3a3a3a,7));out.setGravity(Gravity.CENTER);
         TextView name=tv(first?m.player1:m.player2,13,favoriteColor(m,first),true);name.setGravity(Gravity.CENTER);
+        // Portraits publics Supabase Storage, nom exact comme la version PC.
+        ImageView photo=new ImageView(this);
+        photo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        photo.setContentDescription("Portrait de "+(first?m.player1:m.player2));
+        out.addView(photo,new LinearLayout.LayoutParams(-1,dp(58)));
+        loadPortrait(first?m.player1:m.player2,photo);
         out.addView(name,new LinearLayout.LayoutParams(-1,0,1));
         String server=e==null?"":(e.optInt("server",0)==(first?1:2)?"  🎾":"");
-        TextView avm=tv("AVM "+odds(m.match,first?"avm_odd1":"avm_odd2")+server,11,Color.WHITE,false);avm.setGravity(Gravity.CENTER);
+        TextView avm=tv(odds(m.match,first?"avm_odd1":"avm_odd2")+server,11,Color.WHITE,false);avm.setGravity(Gravity.CENTER);
         out.addView(avm);
-        TextView live=tv("LIVE "+currentOdds(m,first),14,0xffdfff00,true);live.setGravity(Gravity.CENTER);
+        TextView live=tv(currentOdds(m,first),14,0xffdfff00,true);live.setGravity(Gravity.CENTER);
         out.addView(live);
         return out;
+    }
+    private void loadPortrait(String player,ImageView target){
+        if(portraits.containsKey(player)){
+            Bitmap cached=portraits.get(player);if(cached!=null)target.setImageBitmap(cached);return;
+        }
+        io.execute(()->{
+            Bitmap bitmap=null;
+            try{
+                String file=player.replace("/","_").replace("\\","_").replaceAll("\\.+$","");
+                String name=java.net.URLEncoder.encode(file.replaceAll("\\.$","" )+".png","UTF-8").replace("+","%20");
+                URL url=new URL(SupabaseApi.ENDPOINT+"/storage/v1/object/public/images/joueurs/"+name);
+                HttpURLConnection connection=(HttpURLConnection)url.openConnection();
+                connection.setConnectTimeout(5000);connection.setReadTimeout(5000);
+                try(InputStream stream=connection.getInputStream()){
+                    bitmap=BitmapFactory.decodeStream(stream);
+                }finally{connection.disconnect();}
+            }catch(Exception ignored){}
+            final Bitmap finalBitmap=bitmap;
+            ui(()->{portraits.put(player,finalBitmap);if(finalBitmap!=null)target.setImageBitmap(finalBitmap);});
+        });
     }
     /** V1.21 : Balle de break déterminée uniquement depuis le score observé et le serveur. */
     private boolean isBreakPoint(JSONObject e){
