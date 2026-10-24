@@ -46,12 +46,12 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** TPAI V1.30 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
+/** TPAI V1.31 : onglet Matchs d'entrainement de la version PC 845, adaptation Android.
  *  Une seule base distante tpai via REST; ZERO SQLite / zero copie permanente.
  *  La lecture reproduit les etats LIVE enregistres, non le moteur PC PBP complet.
  */
 public final class MainActivity extends Activity {
-    private static final String BUILD_MARKER = "TPAI_BUILD_V130_PC_TRAINING_CASCADE";
+    private static final String BUILD_MARKER = "TPAI_BUILD_V131_PC_TRAINING_CASCADE";
     private static final int MAX_TRAINING = 10;
     private static final String MATCH_FIELDS = "match_id,match_date,match_time,competition_id,player1_id,player2_id,match_type,team_type,live_status,has_estimated_live,live_missing_points,live_states_count,live_odds_count,p2p_games_count,avm_odd1,avm_odd2";
     private static final String LIVE_FIELDS = "source_row,t_raw,sets_p1,sets_p2,games_p1,games_p2,points_p1,points_p2,server,odd1,odd2,is_estimated";
@@ -608,8 +608,8 @@ public final class MainActivity extends Activity {
         for(TrainingMatch m:result){
             m.player1=pn.getOrDefault(m.match.optLong("player1_id"),"Joueur #"+m.match.optLong("player1_id"));
             m.player2=pn.getOrDefault(m.match.optLong("player2_id"),"Joueur #"+m.match.optLong("player2_id"));
-            m.tournament=cn.getOrDefault(m.match.optLong("competition_id"),"Compétition #"+m.match.optLong("competition_id"));
-            if(m.tournament==null||m.tournament.trim().isEmpty()||m.tournament.equalsIgnoreCase("null"))m.tournament="Compétition #"+m.match.optLong("competition_id");
+            m.tournament=cn.getOrDefault(m.match.optLong("competition_id"),"Tournoi non renseigné");
+            if(m.tournament==null||m.tournament.trim().isEmpty()||m.tournament.equalsIgnoreCase("null"))m.tournament="Tournoi non renseigné";
         }return result;
     }
 
@@ -905,8 +905,7 @@ public final class MainActivity extends Activity {
         if(m==null)return;
         JSONObject e=m.showResult?m.finalState():m.current();
         LinearLayout alerts=row();alerts.setBackgroundColor(0xff494949);
-        TextView left=tv("S  ST",9,Color.BLACK,true);left.setPadding(dp(4),0,dp(4),0);
-        alerts.addView(left);
+        
         TextView msg=tv("Aucune alerte",10,Color.WHITE,true);msg.setGravity(Gravity.CENTER);
         alerts.addView(msg,new LinearLayout.LayoutParams(0,dp(20),1));
         margin(alerts,bannerHost,-1,20,0,0,0,2);
@@ -921,10 +920,10 @@ public final class MainActivity extends Activity {
         upper.addView(p1,new LinearLayout.LayoutParams(0,dp(112),1));
         LinearLayout middle=col();middle.setGravity(Gravity.CENTER);
         TextView ball=tv("🎾",17,0xffffeb51,true);ball.setGravity(Gravity.CENTER);
-        if(e!=null){String serve=e.optString("server","");if(serve.equals("1")||serve.equalsIgnoreCase("J1"))ball.setText("🎾 ◀");else if(serve.equals("2")||serve.equalsIgnoreCase("J2"))ball.setText("▶ 🎾");}
-        middle.addView(ball);
+        
         TextView points=tv(tennisPoints(m,e).replace(" - "," : "),23,0xffc7f000,true);
         points.setGravity(Gravity.CENTER);middle.addView(points);
+        middle.addView(ball);
         upper.addView(middle,new LinearLayout.LayoutParams(dp(108),dp(104)));
         upper.addView(p2,new LinearLayout.LayoutParams(0,dp(112),1));
         bannerHost.addView(upper);
@@ -982,12 +981,11 @@ public final class MainActivity extends Activity {
         TextView label=tv(name,10,first?PINK:BLUE,true);label.setGravity(Gravity.CENTER);
         label.setSingleLine(true);label.setEllipsize(android.text.TextUtils.TruncateAt.END);
         player.addView(label,new LinearLayout.LayoutParams(-1,dp(24)));
-        LinearLayout details=row();details.setGravity(Gravity.CENTER);
+        LinearLayout details=row();details.setGravity(Gravity.CENTER_VERTICAL);
         ImageView portrait=new ImageView(this);portrait.setScaleType(ImageView.ScaleType.FIT_CENTER);
         portrait.setImageBitmap(anonymousPortrait(first?PINK:BLUE));
         portrait.setContentDescription("Portrait de "+name);
         loadPortrait(name,portrait);
-        details.addView(portrait,new LinearLayout.LayoutParams(0,dp(69),1));
         LinearLayout numbers=col();numbers.setGravity(Gravity.CENTER);
         TextView avm=tv(odds(m.match,first?"avm_odd1":"avm_odd2"),10,Color.WHITE,false);
         TextView live=tv(currentOdds(m,first),12,0xffd6eb4d,true);
@@ -995,42 +993,65 @@ public final class MainActivity extends Activity {
         numbers.addView(avm);numbers.addView(live);
         TextView sets=tv(gridNum(e,first?"sets_p1":"sets_p2"),25,Color.WHITE,true);
         sets.setGravity(Gravity.CENTER);numbers.addView(sets);
-        details.addView(numbers,new LinearLayout.LayoutParams(dp(49),dp(75)));
+        // Miroir exact autour des points: portrait | cotes/sets || sets/cotes | portrait.
+        if(first){
+            details.addView(portrait,new LinearLayout.LayoutParams(0,dp(69),1));
+            details.addView(numbers,new LinearLayout.LayoutParams(dp(49),dp(75)));
+        }else{
+            details.addView(numbers,new LinearLayout.LayoutParams(dp(49),dp(75)));
+            details.addView(portrait,new LinearLayout.LayoutParams(0,dp(69),1));
+        }
         player.addView(details,new LinearLayout.LayoutParams(-1,dp(79)));
         return player;
     }
     private void attachSwipeRow(TrainingMatch m,LinearLayout line){
+        // La fenetre masque completement la corbeille tant que la ligne n'est pas deplacee.
         FrameLayout frame=new FrameLayout(this);
-        Button delete=button("🗑",0xffb12f39);delete.setContentDescription("Supprimer "+m.player1+" contre "+m.player2);
-        FrameLayout.LayoutParams trashParams=new FrameLayout.LayoutParams(dp(70),dp(65),Gravity.LEFT|Gravity.TOP);
+        frame.setClipChildren(true);frame.setClipToPadding(true);
+        frame.setBackgroundColor(0xff0d1b27);
+        Button delete=button("🗑",0xffb12f39);
+        delete.setContentDescription("Supprimer "+m.player1+" contre "+m.player2);
+        FrameLayout.LayoutParams trashParams=new FrameLayout.LayoutParams(dp(65),-1,Gravity.LEFT);
         frame.addView(delete,trashParams);
         delete.setOnClickListener(v->{
             training.remove(m.id);tickHistory.remove(m.id);
             if(activeId==m.id)activeId=training.isEmpty()?-1:training.values().iterator().next().id;
             revealedMatchId=-1;saveSelection();renderBanner();renderList();
         });
-        frame.addView(line,new FrameLayout.LayoutParams(-1,dp(65)));
-        if(revealedMatchId==m.id)line.setTranslationX(dp(70));
-        final float[] down={0,0};final boolean[] swiped={false};
+        // Un fond opaque sur toute la largeur du match cache le bouton rouge en position 0.
+        line.setBackgroundColor(m.id==activeId?0xff18392e:0xff0d1b27);
+        frame.addView(line,new FrameLayout.LayoutParams(-1,-1));
+        final int width=dp(65);
+        line.setTranslationX(revealedMatchId==m.id?width:0);
+        final float[] down={0,0};
+        final boolean[] swiped={false};
+        final float[] initial={0};
         line.setOnTouchListener((v,event)->{
             switch(event.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    down[0]=event.getX();down[1]=event.getY();swiped[0]=false;return true;
+                    down[0]=event.getRawX();down[1]=event.getRawY();
+                    initial[0]=line.getTranslationX();swiped[0]=false;return true;
                 case MotionEvent.ACTION_MOVE:
-                    float delta=event.getX()-down[0];
-                    if(Math.abs(delta)>dp(10)&&Math.abs(delta)>Math.abs(event.getY()-down[1]))swiped[0]=true;
-                    if(swiped[0]){listScroll.requestDisallowInterceptTouchEvent(true);line.setTranslationX(Math.min(dp(70),Math.max(0,(revealedMatchId==m.id?dp(70):0)+delta)));return true;}
+                    float dx=event.getRawX()-down[0],dy=event.getRawY()-down[1];
+                    if(!swiped[0]&&Math.abs(dx)>dp(9)&&Math.abs(dx)>Math.abs(dy))swiped[0]=true;
+                    if(swiped[0]){
+                        listScroll.requestDisallowInterceptTouchEvent(true);
+                        line.setTranslationX(Math.max(0,Math.min(width,initial[0]+dx)));
+                    }
                     return true;
                 case MotionEvent.ACTION_UP:
                     listScroll.requestDisallowInterceptTouchEvent(false);
                     if(swiped[0]){
-                        boolean open=line.getTranslationX()>dp(35);
-                        revealedMatchId=open?m.id:-1;renderList();return true;
+                        boolean open=line.getTranslationX()>width/2;
+                        revealedMatchId=open?m.id:-1;
+                        renderList();return true;
                     }
                     if(revealedMatchId==m.id){revealedMatchId=-1;renderList();}
-                    else {activeId=m.id;saveSelection();renderBanner();renderList();fetchStates(m,false);}
+                    else{activeId=m.id;saveSelection();renderBanner();renderList();fetchStates(m,false);}
                     return true;
-                case MotionEvent.ACTION_CANCEL:listScroll.requestDisallowInterceptTouchEvent(false);line.setTranslationX(revealedMatchId==m.id?dp(70):0);return true;
+                case MotionEvent.ACTION_CANCEL:
+                    listScroll.requestDisallowInterceptTouchEvent(false);
+                    line.setTranslationX(revealedMatchId==m.id?width:0);return true;
             }
             return true;
         });
